@@ -1,11 +1,23 @@
-from _thread import exit
+import socket
 
 from envs.coding_env import CodeAction, CodingEnv
 from openenv_core.containers.runtime import LocalDockerProvider
 
+def find_available_port():
+    """Find an available port on the host."""
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind(("", 0))
+        s.listen(1)
+        port = s.getsockname()[1]
+    return port
+
+# Find an available port to avoid conflicts with existing services
+port = find_available_port()
+print(f"Using port: {port}")
+
 provider = LocalDockerProvider()
-base_url = provider.start_container("coding-env:latest")
-print(base_url)  # http://127.0.0.1:<port>
+base_url = provider.start_container("coding-env:latest", port=port)
+print(f"Container started at: {base_url}")
 
 # Wait for the server to be ready before creating the client
 provider.wait_for_ready(base_url, timeout_s=100)

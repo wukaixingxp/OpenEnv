@@ -1,0 +1,10 @@
+Traceback (most recent call last):
+  File "/home/kaiwu/work/kaiwu/OpenEnv/test_openenv.py", line 7, in <module>
+    base_url = provider.start_container("coding-env:latest")
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/kaiwu/work/kaiwu/OpenEnv/src/core/containers/runtime/providers.py", line 356, in start_container
+    result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/kaiwu/.conda/envs/forge/lib/python3.12/subprocess.py", line 571, in run
+    raise CalledProcessError(retcode, process.args,
+subprocess.CalledProcessError: Command '['podman', 'run', '-d', '--name', 'coding-env-1761861983029', '-p', '127.0.0.1:38989:8000', 'coding-env:latest']' returned non-zero exit status 126.

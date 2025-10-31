@@ -19,15 +19,34 @@ Usage:
 
     # Or run directly:
     python -m envs.coding_env.server.app
+    
+    # With custom imports:
+    PYTHON_ADDITIONAL_IMPORTS="sys,os,functools,typing" python -m envs.coding_env.server.app
 """
+
+import os
 
 from core.env_server import create_app
 
 from ..models import CodeAction, CodeObservation
 from .python_codeact_env import PythonCodeActEnv
 
-# Create the environment instance
-env = PythonCodeActEnv()
+# Get additional imports from environment variable
+# Format: comma-separated list, e.g., "sys,os,functools,typing"
+additional_imports_str = os.environ.get("PYTHON_ADDITIONAL_IMPORTS", "")
+if additional_imports_str:
+    additional_imports = [imp.strip() for imp in additional_imports_str.split(",") if imp.strip()]
+else:
+    # Default imports that match the common_imports used in reward evaluation
+    additional_imports = [
+        "sys",
+        "os",
+        "functools",
+        "typing",
+    ]
+
+# Create the environment instance with authorized imports
+env = PythonCodeActEnv(additional_imports=additional_imports)
 
 # Create the app with web interface and README integration
 app = create_app(env, CodeAction, CodeObservation, env_name="coding_env")

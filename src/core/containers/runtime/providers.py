@@ -145,6 +145,9 @@ class LocalDockerProvider(ContainerProvider):
         """
         import subprocess
         import time
+        import logging
+
+        logger = logging.getLogger(__name__)
 
         # Use default port if not specified
         if port is None:
@@ -155,6 +158,7 @@ class LocalDockerProvider(ContainerProvider):
 
         # Build docker run command
         # Use host networking for better performance and consistency with podman
+        # NOTE: Do NOT use --rm initially - if container fails to start, we need logs
         cmd = [
             "docker", "run",
             "-d",  # Detached
@@ -167,27 +171,24 @@ class LocalDockerProvider(ContainerProvider):
             for key, value in env_vars.items():
                 cmd.extend(["-e", f"{key}={value}"])
 
+        # Pass custom port via environment variable instead of overriding command
+        # This allows the container to use its proper entrypoint/CMD
+        if port != 8000:
+            cmd.extend(["-e", f"PORT={port}"])
+
         # Add image
         cmd.append(image)
           
-        # Add command override if provided (to change port)
+        # Add command override if provided (explicit override by user)
         if "command_override" in kwargs:
             cmd.extend(kwargs["command_override"])
-        elif port != 8000:
-            # Infer app path from image name for common environments
-            app_module = self._infer_app_module(image)
-            if app_module:
-                cmd.extend([
-                    "uvicorn",
-                    app_module,
-                    "--host", "0.0.0.0",
-                    "--port", str(port)
-                ])
 
         # Run container
         try:
+            logger.debug(f"Starting container with command: {' '.join(cmd)}")
             result = subprocess.run(cmd, capture_output=True, text=True, check=True)
             self._container_id = result.stdout.strip()
+            logger.debug(f"Container started with ID: {self._container_id}")
         except subprocess.CalledProcessError as e:
             error_msg = f"Failed to start Docker container.\nCommand: {' '.join(cmd)}\nExit code: {e.returncode}\nStderr: {e.stderr}\nStdout: {e.stdout}"
             raise RuntimeError(error_msg) from e
@@ -262,20 +263,41 @@ class LocalDockerProvider(ContainerProvider):
 
         # If we timeout, provide diagnostic information
         error_msg = f"Container at {base_url} did not become ready within {timeout_s}s"
-        
+          
         if self._container_id:
             try:
-                # Get container logs to help diagnose the issue
-                result = subprocess.run(
-                    ["docker", "logs", "--tail", "50", self._container_id],
+                # First check if container exists
+                inspect_result = subprocess.run(
+                    ["docker", "inspect", self._container_id],
                     capture_output=True,
                     text=True,
                     timeout=5,
                 )
-                if result.stdout or result.stderr:
-                    error_msg += f"\n\nContainer logs (last 50 lines):\n{result.stdout}\n{result.stderr}"
-            except Exception:
-                pass
+                  
+                if inspect_result.returncode != 0:
+                    # Container doesn't exist - likely exited and auto-removed due to --rm flag
+                    error_msg += f"\n\nContainer was auto-removed (likely exited immediately)."
+                    error_msg += f"\nThis typically means:"
+                    error_msg += f"\n  1. The container image has an error in its startup script"
+                    error_msg += f"\n  2. Required dependencies are missing in the container"
+                    error_msg += f"\n  3. Port {base_url.split(':')[-1]} might be in use by another process"
+                    error_msg += f"\n  4. Container command/entrypoint is misconfigured"
+                    error_msg += f"\nTry running the container manually to debug:"
+                    error_msg += f"\n  docker run -it --rm <IMAGE_NAME>"
+                else:
+                    # Container exists, try to get logs
+                    result = subprocess.run(
+                        ["docker", "logs", "--tail", "50", self._container_id],
+                        capture_output=True,
+                        text=True,
+                        timeout=5,
+                    )
+                    if result.stdout or result.stderr:
+                        error_msg += f"\n\nContainer logs (last 50 lines):\n{result.stdout}\n{result.stderr}"
+            except subprocess.TimeoutExpired:
+                error_msg += f"\n\nTimeout while trying to inspect container"
+            except Exception as e:
+                error_msg += f"\n\nFailed to get container diagnostics: {e}"
 
         if last_error:
             error_msg += f"\n\nLast connection error: {last_error}"

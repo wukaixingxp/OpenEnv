@@ -243,23 +243,44 @@ class LocalDockerProvider(ContainerProvider):
         """
         import time
         import requests
+        import subprocess
+        import logging
 
         start_time = time.time()
         health_url = f"{base_url}/health"
+        last_error = None
 
         while time.time() - start_time < timeout_s:
             try:
                 response = requests.get(health_url, timeout=2.0)
                 if response.status_code == 200:
                     return
-            except requests.RequestException:
-                pass
+            except requests.RequestException as e:
+                last_error = str(e)
 
             time.sleep(0.5)
 
-        raise TimeoutError(
-            f"Container at {base_url} did not become ready within {timeout_s}s"
-        )
+        # If we timeout, provide diagnostic information
+        error_msg = f"Container at {base_url} did not become ready within {timeout_s}s"
+        
+        if self._container_id:
+            try:
+                # Get container logs to help diagnose the issue
+                result = subprocess.run(
+                    ["docker", "logs", "--tail", "50", self._container_id],
+                    capture_output=True,
+                    text=True,
+                    timeout=5,
+                )
+                if result.stdout or result.stderr:
+                    error_msg += f"\n\nContainer logs (last 50 lines):\n{result.stdout}\n{result.stderr}"
+            except Exception:
+                pass
+
+        if last_error:
+            error_msg += f"\n\nLast connection error: {last_error}"
+
+        raise TimeoutError(error_msg)
 
     def _find_available_port(self) -> int:
         """

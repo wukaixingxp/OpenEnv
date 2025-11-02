@@ -139,6 +139,7 @@ class LocalDockerProvider(ContainerProvider):
             env_vars: Environment variables for the container
             **kwargs: Additional Docker run options
                 - command_override: List of command args to override container CMD
+                - memory_gb: Memory limit in GB (default: 4GB)
 
         Returns:
             Base URL to connect to the container
@@ -153,6 +154,9 @@ class LocalDockerProvider(ContainerProvider):
         if port is None:
             port = 8000
 
+        # Use default memory limit if not specified
+        memory_gb = kwargs.get("memory_gb", 4)
+
         # Generate container name
         self._container_name = self._generate_container_name(image)
 
@@ -164,6 +168,9 @@ class LocalDockerProvider(ContainerProvider):
             "-d",  # Detached
             "--name", self._container_name,
             "--network", "host",  # Use host network
+            "--memory", f"{memory_gb}g",  # Limit container memory
+            "--memory-swap", f"{memory_gb}g",  # Prevent swap usage (set equal to --memory)
+            "--oom-kill-disable=false",  # Allow OOM killer (exit gracefully)
         ]
 
         # Add environment variables

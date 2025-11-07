@@ -187,6 +187,25 @@ class TextArenaEnvironment(Environment):
 
     def _convert_messages(self, messages: Iterable[Any]) -> List[TextArenaMessage]:
         converted: List[TextArenaMessage] = []
+        buffered_content: List[str] = []
+        buffered_sender: int | None = None
+        buffered_category: str | None = None
+        last_char_was_newline = False
+
+        def flush_buffer() -> None:
+            nonlocal buffered_content, buffered_sender, buffered_category
+            if buffered_content:
+                converted.append(
+                    TextArenaMessage(
+                        sender_id=buffered_sender if buffered_sender is not None else -1,
+                        content="".join(buffered_content),
+                        category=buffered_category or "MESSAGE",
+                    )
+                )
+            buffered_content = []
+            buffered_sender = None
+            buffered_category = None
+
         for entry in messages:
             if isinstance(entry, tuple) and len(entry) == 3:
                 sender, content, category = entry
@@ -197,13 +216,34 @@ class TextArenaEnvironment(Environment):
                 sender, content, category = -1, str(entry), "MESSAGE"
 
             category_name = getattr(category, "name", str(category))
-            converted.append(
-                TextArenaMessage(
-                    sender_id=int(sender) if isinstance(sender, (int, float)) else -1,
-                    content=str(content),
-                    category=category_name,
-                )
-            )
+            sender_id = int(sender) if isinstance(sender, (int, float)) else -1
+            text = str(content)
+
+            if text == "\n":
+                flush_buffer()
+                if last_char_was_newline:
+                    converted.append(
+                        TextArenaMessage(
+                            sender_id=sender_id,
+                            content="",
+                            category=category_name,
+                        )
+                    )
+                last_char_was_newline = True
+                continue
+
+            if buffered_sender is None or buffered_category is None:
+                buffered_sender = sender_id
+                buffered_category = category_name
+            elif buffered_sender != sender_id or buffered_category != category_name:
+                flush_buffer()
+                buffered_sender = sender_id
+                buffered_category = category_name
+
+            buffered_content.append(text)
+            last_char_was_newline = False
+
+        flush_buffer()
 
         return converted
 
@@ -249,4 +289,3 @@ class TextArenaEnvironment(Environment):
             for key, value in result.items():
                 aggregated[key] = float(value)
         return aggregated
-

@@ -13,9 +13,11 @@ ARG BASE_IMAGE=openenv-base:latest
 FROM ${BASE_IMAGE}
 
 # Install Julia using juliaup (official installer - more reliable in Docker)
+# Also install build-essential for PackageCompiler (needs gcc to build sysimages)
 RUN apt-get update && apt-get install -y \
     curl \
     ca-certificates \
+    build-essential \
     && rm -rf /var/lib/apt/lists/*
 
 # Install juliaup and Julia

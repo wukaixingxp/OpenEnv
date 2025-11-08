@@ -37,9 +37,13 @@ RUN pip install --no-cache-dir smolagents
 COPY src/core/ /app/src/core/
 COPY src/envs/julia_env/ /app/src/envs/julia_env/
 
+# Environment variables for port and workers with defaults
+ENV PORT=8000
+ENV NUM_WORKER=4
+
 # Health check
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-    CMD curl -f http://localhost:8000/health || exit 1
+    CMD curl -f http://localhost:${PORT}/health || exit 1
 
 # Run the FastAPI server
-CMD ["uvicorn", "envs.julia_env.server.app:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD uvicorn envs.julia_env.server.app:app --host 0.0.0.0 --port ${PORT} --workers ${NUM_WORKER}

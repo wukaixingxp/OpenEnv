@@ -33,6 +33,11 @@ RUN julia -e 'using Test; println("Julia Test module ready")'
 # Install smolagents for Python code execution utilities
 RUN pip install --no-cache-dir smolagents
 
+# Environment variable to enable Julia process pool (optional - can be set at runtime)
+# Set to "1" to enable process pool, "0" to use standard execution
+ENV JULIA_USE_PROCESS_POOL=1
+ENV JULIA_POOL_SIZE=32
+
 # Copy only what's needed for the Julia environment
 COPY src/core/ /app/src/core/
 COPY src/envs/julia_env/ /app/src/envs/julia_env/

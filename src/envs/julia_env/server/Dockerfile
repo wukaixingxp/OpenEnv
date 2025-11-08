@@ -13,11 +13,9 @@ ARG BASE_IMAGE=openenv-base:latest
 FROM ${BASE_IMAGE}
 
 # Install Julia using juliaup (official installer - more reliable in Docker)
-# Also install build-essential for PackageCompiler (needs gcc to build sysimages)
 RUN apt-get update && apt-get install -y \
     curl \
     ca-certificates \
-    build-essential \
     && rm -rf /var/lib/apt/lists/*
 
 # Install juliaup and Julia
@@ -31,35 +29,6 @@ RUN julia --version
 
 # Precompile commonly used Julia packages (Test is built-in, but precompile it)
 RUN julia -e 'using Test; println("Julia Test module ready")'
-
-# PERFORMANCE BOOST: Build custom sysimage with precompiled Test module
-# This speeds up Julia execution by 10-20x (takes ~2 minutes to build)
-RUN echo "Building custom Julia sysimage for faster execution..." && \
-    julia -e 'using Pkg; Pkg.add("PackageCompiler")' && \
-    mkdir -p /root/.julia/sysimages && \
-    julia -e ' \
-        using PackageCompiler; \
-        precompile_script = """ \
-            using Test \
-            @test 1 + 1 == 2 \
-            function example(a, b) \
-                return a + b \
-            end \
-            @test example(2, 3) == 5 \
-        """; \
-        write("/tmp/precompile.jl", precompile_script); \
-        create_sysimage( \
-            [:Test], \
-            sysimage_path="/root/.julia/sysimages/julia_with_test.so", \
-            precompile_execution_file="/tmp/precompile.jl", \
-            cpu_target="generic" \
-        ); \
-        rm("/tmp/precompile.jl"); \
-    ' && \
-    echo "✅ Custom sysimage built successfully"
-
-# Set environment variable to use custom sysimage by default
-ENV JULIA_SYSIMAGE="/root/.julia/sysimages/julia_with_test.so"
 
 # Install smolagents for Python code execution utilities
 RUN pip install --no-cache-dir smolagents

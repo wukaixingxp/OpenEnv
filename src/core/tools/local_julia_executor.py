@@ -117,10 +117,8 @@ class JuliaExecutor:
             # Performance optimization flags:
             # --compile=min: Reduce compilation overhead (faster startup)
             # --optimize=2: Medium optimization level (good balance)
-            # --check-bounds=no: Skip bounds checking for speed (use with caution)
             # --startup-file=no: Don't load ~/.julia/config/startup.jl
             # --history-file=no: Don't save REPL history
-            # --threads=1: Use single thread (faster startup)
             self.base_cmd.extend(
                 [
                     "--compile=min",  # Minimize compilation for faster startup
@@ -129,23 +127,6 @@ class JuliaExecutor:
                     "--history-file=no",  # Skip history
                 ]
             )
-
-            # Check for custom sysimage (10-20x speedup!)
-            sysimage_paths = [
-                os.getenv("JULIA_SYSIMAGE"),  # Environment variable (Docker)
-                os.path.expanduser(
-                    "~/.julia/sysimages/julia_with_test.so"
-                ),  # Default location
-                "/root/.julia/sysimages/julia_with_test.so",  # Docker location
-            ]
-
-            for sysimage_path in sysimage_paths:
-                if sysimage_path and os.path.isfile(sysimage_path):
-                    self.base_cmd.extend(["--sysimage", sysimage_path])
-                    logger.info(
-                        f"🚀 Using custom sysimage: {sysimage_path} (10-20x speedup!)"
-                    )
-                    break
 
             logger.info("Julia optimization flags enabled for faster execution")
 

@@ -135,11 +135,11 @@ class LocalDockerProvider(ContainerProvider):
 
         Args:
             image: Docker image name
-            port: Port to expose (if None, finds available port)
+            port: Port to expose (if None, uses 8000)
             env_vars: Environment variables for the container
             **kwargs: Additional Docker run options
-                - memory_gb: Memory limit in GB (default: 4GB)
                 - command_override: List of command args to override container CMD
+                - memory_gb: Memory limit in GB (default: 4GB)
 
         Returns:
             Base URL to connect to the container
@@ -150,12 +150,12 @@ class LocalDockerProvider(ContainerProvider):
 
         logger = logging.getLogger(__name__)
 
-        # Find available port if not specified
+        # Use default port if not specified
         if port is None:
-            port = self._find_available_port()
+            port = 8000
 
         # Use default memory limit if not specified
-        memory_gb = kwargs.get("memory_gb", 16)
+        memory_gb = kwargs.get("memory_gb", 4)
 
         # Generate container name
         self._container_name = self._generate_container_name(image)
@@ -341,6 +341,31 @@ class LocalDockerProvider(ContainerProvider):
         clean_image = image.split("/")[-1].split(":")[0]
         timestamp = int(time.time() * 1000)
         return f"{clean_image}-{timestamp}"
+
+    def _infer_app_module(self, image: str) -> Optional[str]:
+        """
+        Infer the uvicorn app module path from the image name.
+
+        Args:
+            image: Container image name
+
+        Returns:
+            App module path like "envs.coding_env.server.app:app" or None
+        """
+        clean_image = image.split("/")[-1].split(":")[0]
+        
+        # Map common environment names to their app modules
+        env_module_map = {
+            "coding-env": "envs.coding_env.server.app:app",
+            "echo-env": "envs.echo_env.server.app:app",
+            "git-env": "envs.git_env.server.app:app",
+            "openspiel-env": "envs.openspiel_env.server.app:app",
+            "sumo-rl-env": "envs.sumo_rl_env.server.app:app",
+            "finrl-env": "envs.finrl_env.server.app:app",
+        }
+        
+        return env_module_map.get(clean_image)
+
 
 
 class KubernetesProvider(ContainerProvider):

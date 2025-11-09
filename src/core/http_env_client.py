@@ -46,6 +46,7 @@ class HTTPEnvClient(ABC, Generic[ActT, ObsT]):
         cls: Type[EnvClientT],
         image: str,
         provider: Optional["ContainerProvider"] = None,
+        wait_timeout: float = 30.0,
         **kwargs: Any,
     ) -> EnvClientT:
         """
@@ -62,6 +63,7 @@ class HTTPEnvClient(ABC, Generic[ActT, ObsT]):
         Args:
             image: Docker image name to run (e.g., "echo-env:latest")
             provider: Container provider to use (defaults to LocalDockerProvider)
+            wait_timeout: Maximum time (in seconds) to wait for container to be ready (default: 30.0)
             **kwargs: Additional arguments to pass to provider.start_container()
                      (e.g., env_vars, port)
 
@@ -79,6 +81,12 @@ class HTTPEnvClient(ABC, Generic[ActT, ObsT]):
             >>> env = CodingEnv.from_docker_image(
             ...     "coding-env:latest",
             ...     env_vars={"MY_VAR": "value"}
+            ... )
+            >>>
+            >>> # Create with custom wait timeout (useful for slow containers)
+            >>> env = CodingEnv.from_docker_image(
+            ...     "coding-env:latest",
+            ...     wait_timeout=60.0  # Wait up to 60 seconds
             ... )
             >>>
             >>> # Use the environment
@@ -99,28 +107,41 @@ class HTTPEnvClient(ABC, Generic[ActT, ObsT]):
         # 1. Start container with optional kwargs (e.g., env_vars, port)
         base_url = provider.start_container(image, **kwargs)
 
-        # 2. Wait for server to be ready
-        provider.wait_for_ready(base_url)
+        # 2. Wait for server to be ready with custom timeout
+        try:
+            provider.wait_for_ready(base_url, timeout_s=wait_timeout)
+        except TimeoutError:
+            # Cleanup: stop and remove the container if it didn't become ready
+            print(
+                f"Container failed to become ready within {wait_timeout}s. Cleaning up..."
+            )
+            provider.stop_container()
+            raise
 
         # 3. Create and return client instance with provider reference
         return cls(base_url=base_url, provider=provider)
 
     @classmethod
-    def from_hub(cls: Type[EnvClientT], repo_id: str, provider: Optional["ContainerProvider"] = None, **kwargs: Any) -> EnvClientT:
+    def from_hub(
+        cls: Type[EnvClientT],
+        repo_id: str,
+        provider: Optional["ContainerProvider"] = None,
+        **kwargs: Any,
+    ) -> EnvClientT:
         """
         Create an environment client by pulling from a Hugging Face model hub.
         """
-        
+
         if provider is None:
             provider = LocalDockerProvider()
-        
+
         if "tag" in kwargs:
             tag = kwargs["tag"]
         else:
             tag = "latest"
-        
+
         base_url = f"registry.hf.space/{repo_id.replace('/', '-')}:{tag}"
-        
+
         return cls.from_docker_image(image=base_url, provider=provider)
 
     @abstractmethod

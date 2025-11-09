@@ -36,11 +36,27 @@ docker build -t julia-env:latest -f src/envs/julia_env/server/Dockerfile .
 ### Run the Server
 
 ```bash
-# Run in background
+# Run in background with default settings (port 8000, 4 workers)
 docker run -d -p 8000:8000 --name julia-env-server julia-env:latest
 
 # OR run in foreground (to see logs)
 docker run -p 8000:8000 --name julia-env-server julia-env:latest
+
+# Run with custom port
+docker run -d -p 9000:9000 -e PORT=9000 --name julia-env-server julia-env:latest
+
+# Run with custom number of workers (uvicorn workers)
+docker run -d -p 8000:8000 -e NUM_WORKER=8 --name julia-env-server julia-env:latest
+
+# Run with custom Julia max workers (for process pool)
+docker run -d -p 8000:8000 -e JULIA_MAX_WORKERS=32 --name julia-env-server julia-env:latest
+
+# Run with all custom configurations
+docker run -d -p 9000:9000 \
+  -e PORT=9000 \
+  -e NUM_WORKER=8 \
+  -e JULIA_MAX_WORKERS=32 \
+  --name julia-env-server julia-env:latest
 ```
 
 ### Test the Server
@@ -259,18 +275,18 @@ This environment is designed for GRPO (Group Relative Policy Optimization) train
 # In your GRPO training loop
 async def play_julia_game(game_idx, game_id, server_url, policy, tokenizer):
     env = JuliaEnv(base_url=server_url)
-    
+
     # Generate code with LLM
     prompt = format_julia_prompt(task)
     responses = await policy.generate.route(prompt)
     code = extract_julia_code(responses[0].text)
-    
+
     # Execute in environment
     result = env.step(JuliaAction(code=code))
-    
+
     # Get reward
     reward = result.observation.reward
-    
+
     return {
         "prompt": prompt,
         "response": responses[0],
@@ -284,9 +300,29 @@ See `examples/grpo_blackjack/` for a complete GRPO training example that can be 
 
 ## Configuration
 
-### Environment Variables
+### Docker Environment Variables
 
-- `PORT`: Server port (default: 8000)
+The Docker container accepts the following environment variables:
+
+- **`PORT`**: HTTP server port (default: `8000`)
+  - Controls which port the FastAPI server listens on
+  - Must match the port mapping in `-p` flag (e.g., `-p 9000:9000 -e PORT=9000`)
+
+- **`NUM_WORKER`**: Number of uvicorn worker processes (default: `4`)
+  - Controls parallel request handling capacity
+  - More workers = more concurrent requests but higher memory usage
+  - Recommended: 2-8 workers for typical workloads
+
+- **`JULIA_MAX_WORKERS`**: Maximum Julia process pool size (default: `16`)
+  - Controls maximum concurrent Julia code executions
+  - Higher values allow more parallel Julia executions
+  - Each worker consumes memory; tune based on available resources
+  - Recommended: 8-32 workers depending on your workload
+
+### Runtime Environment Variables
+
+These can be set when running locally (non-Docker):
+
 - `HOST`: Server host (default: 0.0.0.0)
 - `JULIA_TIMEOUT`: Julia execution timeout in seconds (default: 60)
 
@@ -398,4 +434,3 @@ server/
 ## License
 
 BSD-style license. See LICENSE file in repository root.
-

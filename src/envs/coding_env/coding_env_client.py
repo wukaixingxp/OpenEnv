@@ -32,6 +32,7 @@ class CodingEnv(HTTPEnvClient[CodeAction, CodeObservation]):
         # Shape expected by the server's /step endpoint under "action"
         return {
             "code": action.code,
+            "test_code": action.test_code,
         }
 
     def _parse_result(self, payload: dict) -> StepResult[CodeObservation]:
@@ -51,10 +52,13 @@ class CodingEnv(HTTPEnvClient[CodeAction, CodeObservation]):
             payload: JSON response from /state endpoint
 
         Returns:
-            CodeState object with episode_id, step_count, and last_exit_code
+            CodeState object with episode_id, step_count, and execution state
         """
         return CodeState(
             episode_id=payload.get("episode_id"),
             step_count=payload.get("step_count", 0),
             last_exit_code=payload.get("last_exit_code", 0),
+            last_code_compiles=payload.get("last_code_compiles", True),
+            total_tests_passed=payload.get("total_tests_passed", 0),
+            total_tests_failed=payload.get("total_tests_failed", 0),
         )

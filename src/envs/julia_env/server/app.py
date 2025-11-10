@@ -46,6 +46,7 @@ from typing import Any, Dict
 from fastapi import Body, FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 
+from core.tools import JuliaExecutor
 from ..models import JuliaAction, JuliaObservation
 from .julia_codeact_env import JuliaCodeActEnv
 
@@ -121,6 +122,23 @@ async def lifespan(app: FastAPI):
             max_workers=MAX_WORKERS, thread_name_prefix="julia_worker"
         )
         logger.info(f"✅ Thread pool created with {MAX_WORKERS} workers")
+
+        # Initialize Julia process pool to avoid Juliaup lock contention
+        # This creates persistent Julia processes that are reused across requests
+        pool_size = min(MAX_WORKERS, 8)  # Use up to 8 Julia workers
+        logger.info(f"🔧 Initializing Julia process pool with {pool_size} workers...")
+        pool_enabled = JuliaExecutor.enable_process_pool(
+            size=pool_size, timeout=EXECUTION_TIMEOUT
+        )
+        if pool_enabled:
+            logger.info(
+                f"✅ Julia process pool initialized (fixes Juliaup lock contention)"
+            )
+        else:
+            logger.warning(
+                "⚠️ Julia process pool not available, using standard execution"
+            )
+
         logger.info(f"✅ Julia Environment Server started successfully")
         print(
             f"✅ Julia Environment Server started with {MAX_WORKERS} concurrent workers"
@@ -135,6 +153,10 @@ async def lifespan(app: FastAPI):
     # Shutdown: Cleanup with grace period
     logger.info("Shutting down Julia Environment Server...")
     try:
+        # Shutdown Julia process pool first
+        JuliaExecutor.shutdown_pool()
+        logger.info("✅ Julia process pool shut down")
+
         executor.shutdown(wait=True, cancel_futures=False)
         logger.info("✅ All workers completed gracefully")
     except Exception as e:

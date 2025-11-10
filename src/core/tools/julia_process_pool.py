@@ -318,7 +318,8 @@ class JuliaProcessPool:
         self.pool_lock = threading.Lock()
         self.shutdown_flag = False
 
-        # Create worker processes
+        # Create worker processes with staggered initialization
+        # to avoid Juliaup lock contention when starting multiple workers
         logger.info(f"Creating Julia process pool with {size} workers")
         for i in range(size):
             try:
@@ -330,6 +331,12 @@ class JuliaProcessPool:
                 )
                 self.workers.append(worker)
                 self.available_workers.append(worker)
+
+                # Add delay between worker starts to prevent Juliaup lock contention
+                # This fixes "Juliaup configuration is locked by another process" errors
+                if i < size - 1:  # Don't delay after the last worker
+                    time.sleep(0.5)  # 500ms delay between worker starts
+
             except Exception as e:
                 logger.error(f"Failed to create worker {i}: {e}")
                 # Clean up partially created pool

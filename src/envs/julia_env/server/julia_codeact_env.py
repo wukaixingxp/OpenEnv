@@ -33,9 +33,15 @@ class JuliaCodeActEnv(Environment):
         >>> print(env.state.last_exit_code)  # 0
     """
 
-    def __init__(self):
-        """Initialize the Julia Code Act Environment."""
-        self._executor = JuliaExecutor()
+    def __init__(self, use_process_pool: bool = True):
+        """
+        Initialize the Julia Code Act Environment.
+
+        Args:
+            use_process_pool: Use persistent Julia process pool for better performance
+                            and to avoid Juliaup lock contention (default: True)
+        """
+        self._executor = JuliaExecutor(use_process_pool=use_process_pool)
         self._state = JuliaState()
         self.transform = create_safe_julia_transform()
 
@@ -43,11 +49,13 @@ class JuliaCodeActEnv(Environment):
         """
         Reset environment for a fresh Julia execution session.
         Returns an empty JuliaObservation with exit_code=0.
+
+        Note: Executor is reused to leverage process pool.
         """
         self._state = JuliaState(episode_id=str(uuid.uuid4()), step_count=0)
         self._state.last_exit_code = 0
         self._state.last_code_compiles = True
-        self._executor = JuliaExecutor()
+        # Don't recreate executor - reuse it to leverage process pool
 
         observation = JuliaObservation(
             stdout="",

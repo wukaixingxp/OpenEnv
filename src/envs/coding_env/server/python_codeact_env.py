@@ -206,7 +206,7 @@ class PythonCodeActEnv(Environment):
         Build a proper test script with individual test case validation.
 
         This follows the GroundTruthTestReward pattern to:
-        - Add common imports
+        - Add common imports (matching authorized imports from config)
         - Include user's code
         - Wrap each test case in try/except for individual validation
         - Print structured output for parsing
@@ -218,7 +218,8 @@ class PythonCodeActEnv(Environment):
         Returns:
             Complete test script ready for execution
         """
-        # Common imports that most Python code might need
+        # Common imports that match the authorized additional_imports
+        # This should be kept in sync with the YAML config additional_imports
         common_imports = """import math
 import re
 import sys
@@ -229,6 +230,18 @@ import functools
 import collections
 from typing import List, Dict, Set, Tuple, Optional, Any, Union
 from collections import defaultdict, Counter, deque
+import time
+import datetime
+import statistics
+# Additional imports that may be authorized
+try:
+    import numpy
+except ImportError:
+    pass
+try:
+    import pandas
+except ImportError:
+    pass
 """
 
         # Parse test_code into individual test cases

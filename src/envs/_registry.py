@@ -180,13 +180,24 @@ ENV_REGISTRY: Dict[str, Dict[str, Any]] = {
             "Environment configuration via kwargs",
         ],
     },
+    "julia": {
+        "module": "envs.julia_env",
+        "env_class": "JuliaEnv",
+        "action_class": "JuliaAction",
+        "default_image": "julia-env:latest",
+        "description": "Julia code execution environment with test support",
+        "special_requirements": None,
+        "supported_features": [
+            "Julia code execution",
+            "Test execution with @test macros",
+            "stdout/stderr/exit_code capture",
+            "Code compilation checking",
+        ],
+    },
 }
 
 # Deprecated or removed environments
-DEPRECATED_ENVS: Dict[str, str] = {
-    "julia": "julia_env has been removed from this version of OpenEnv. "
-    "The Julia environment is no longer maintained.",
-}
+DEPRECATED_ENVS: Dict[str, str] = {}
 
 
 def get_env_info(env_key: str) -> Dict[str, Any]:

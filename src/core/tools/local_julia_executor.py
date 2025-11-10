@@ -48,6 +48,32 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 
+def _ensure_julia_in_path():
+    """
+    Ensure Julia installation paths are in PATH environment variable.
+
+    This fixes issues where uvicorn workers don't properly inherit
+    the PATH from the Dockerfile ENV directive.
+    """
+    julia_paths = [
+        os.path.expanduser("~/.juliaup/bin"),
+        os.path.expanduser("~/.julia/bin"),
+        "/usr/local/bin",
+        "/usr/bin",
+    ]
+
+    current_path = os.environ.get("PATH", "")
+    path_entries = current_path.split(os.pathsep)
+
+    # Add Julia paths if not already in PATH
+    for julia_path in julia_paths:
+        if os.path.isdir(julia_path) and julia_path not in path_entries:
+            current_path = f"{julia_path}{os.pathsep}{current_path}"
+            logger.debug(f"Added {julia_path} to PATH")
+
+    os.environ["PATH"] = current_path
+
+
 class JuliaExecutor:
     """
     Executor for running Julia code in a subprocess with robust process management.
@@ -112,6 +138,9 @@ class JuliaExecutor:
         Raises:
             RuntimeError: If Julia executable is not found in PATH
         """
+        # Ensure Julia paths are in PATH (fixes uvicorn worker PATH inheritance issues)
+        _ensure_julia_in_path()
+
         self.timeout = timeout
         self.max_retries = max_retries
         self.use_optimization_flags = use_optimization_flags

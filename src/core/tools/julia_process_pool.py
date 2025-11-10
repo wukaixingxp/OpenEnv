@@ -29,6 +29,7 @@ Example:
 import atexit
 import logging
 import os
+import shutil
 import subprocess
 import threading
 import time
@@ -350,12 +351,30 @@ class JuliaProcessPool:
 
     def _find_julia_executable(self) -> str:
         """Find Julia executable in PATH or common locations."""
-        # Try PATH first
-        julia_path = os.popen("which julia").read().strip()
+        # Ensure Julia paths are in PATH environment variable
+        julia_bin_dirs = [
+            os.path.expanduser("~/.juliaup/bin"),
+            os.path.expanduser("~/.julia/bin"),
+            "/usr/local/bin",
+            "/usr/bin",
+        ]
+
+        current_path = os.environ.get("PATH", "")
+        path_entries = current_path.split(os.pathsep)
+
+        # Add Julia paths if not already in PATH
+        for julia_path in julia_bin_dirs:
+            if os.path.isdir(julia_path) and julia_path not in path_entries:
+                current_path = f"{julia_path}{os.pathsep}{current_path}"
+
+        os.environ["PATH"] = current_path
+
+        # Try PATH first using shutil.which (more reliable than os.popen)
+        julia_path = shutil.which("julia")
         if julia_path:
             return julia_path
 
-        # Try common locations
+        # Try common locations directly
         common_paths = [
             os.path.expanduser("~/.juliaup/bin/julia"),
             os.path.expanduser("~/.julia/bin/julia"),

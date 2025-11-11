@@ -220,9 +220,13 @@ async def execute_julia_async(
     max_retries = 2
     retry_count = 0
 
-    logger.debug(
-        f"[{request_id}] Starting Julia execution (timeout: {EXECUTION_TIMEOUT}s)"
+    logger.info(
+        f"[{request_id}] Starting Julia execution "
+        f"(timeout: {EXECUTION_TIMEOUT}s, core_code: {len(action.core_code)} chars, "
+        f"test_code: {len(action.test_code)} chars)"
     )
+
+    execution_start = datetime.now()
 
     while retry_count <= max_retries:
         env = None
@@ -237,28 +241,35 @@ async def execute_julia_async(
                 timeout=EXECUTION_TIMEOUT,
             )
 
-            logger.debug(f"[{request_id}] Julia execution completed successfully")
-            logger.debug(
-                f"[{request_id}] Result: tests_passed={observation.tests_passed}, "
-                f"tests_failed={observation.tests_failed}, reward={observation.reward}"
+            elapsed = (datetime.now() - execution_start).total_seconds()
+            logger.info(
+                f"[{request_id}] Julia execution completed in {elapsed:.2f}s "
+                f"(tests_passed={observation.tests_passed}, "
+                f"tests_failed={observation.tests_failed}, "
+                f"reward={observation.reward}, "
+                f"exit_code={observation.exit_code})"
             )
 
             return observation
 
         except asyncio.TimeoutError:
             retry_count += 1
+            elapsed = (datetime.now() - execution_start).total_seconds()
             logger.warning(
-                f"[{request_id}] Julia execution timeout (attempt {retry_count}/{max_retries + 1})"
+                f"[{request_id}] Julia execution timeout after {elapsed:.2f}s "
+                f"(attempt {retry_count}/{max_retries + 1}, limit: {EXECUTION_TIMEOUT}s)"
             )
 
             if retry_count > max_retries:
                 logger.error(
-                    f"[{request_id}] Julia execution failed after {max_retries + 1} attempts"
+                    f"[{request_id}] Julia execution failed after {max_retries + 1} timeout attempts. "
+                    f"Total time: {elapsed:.2f}s. Consider increasing JULIA_EXECUTION_TIMEOUT "
+                    f"or optimizing the Julia code."
                 )
                 # Return a failure observation
                 return JuliaObservation(
                     stdout="",
-                    stderr=f"Execution timeout after {EXECUTION_TIMEOUT}s",
+                    stderr=f"Execution timeout after {EXECUTION_TIMEOUT}s (tried {max_retries + 1} times)",
                     exit_code=-1,
                     tests_passed=0,
                     tests_failed=1,
@@ -272,8 +283,10 @@ async def execute_julia_async(
 
         except Exception as e:
             retry_count += 1
+            elapsed = (datetime.now() - execution_start).total_seconds()
             logger.error(
-                f"[{request_id}] Julia execution error (attempt {retry_count}/{max_retries + 1}): {e}"
+                f"[{request_id}] Julia execution error after {elapsed:.2f}s "
+                f"(attempt {retry_count}/{max_retries + 1}): {type(e).__name__}: {e}"
             )
             logger.error(f"[{request_id}] Traceback:\n{traceback.format_exc()}")
 

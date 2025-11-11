@@ -317,6 +317,7 @@ class JuliaProcessPool:
         self.workers: list[JuliaWorkerProcess] = []
         self.available_workers: deque[JuliaWorkerProcess] = deque()
         self.pool_lock = threading.Lock()
+        self.worker_available = threading.Condition(self.pool_lock)  # Efficient waiting
         self.shutdown_flag = False
 
         # Create worker processes with staggered initialization
@@ -406,10 +407,13 @@ class JuliaProcessPool:
         )
 
     def _get_available_worker(
-        self, timeout: float = 30.0
+        self, timeout: float = 60.0
     ) -> Optional[JuliaWorkerProcess]:
         """
-        Get an available worker from the pool.
+        Get an available worker from the pool using efficient waiting.
+
+        This method uses threading.Condition for efficient blocking instead of
+        busy-waiting, which reduces CPU usage and improves responsiveness.
 
         Args:
             timeout: Maximum time to wait for a worker (seconds)
@@ -417,15 +421,19 @@ class JuliaProcessPool:
         Returns:
             Available worker or None if timeout
         """
-        start_time = time.time()
+        deadline = time.time() + timeout
 
-        while time.time() - start_time < timeout:
-            with self.pool_lock:
+        with self.worker_available:  # Acquires pool_lock
+            while True:
                 # Try to get healthy worker
                 while self.available_workers:
                     worker = self.available_workers.popleft()
 
                     if worker.is_healthy:
+                        logger.debug(
+                            f"Allocated worker {worker.worker_id} "
+                            f"({len(self.available_workers)} remaining)"
+                        )
                         return worker
 
                     # Worker is unhealthy, try to recover
@@ -443,23 +451,51 @@ class JuliaProcessPool:
                             )
                             # Update in workers list
                             self.workers[worker.worker_id] = worker
+                            logger.info(f"Worker {worker.worker_id} recovered successfully")
                             return worker
                         except Exception as e:
                             logger.error(
                                 f"Failed to recover worker {worker.worker_id}: {e}"
                             )
 
-            # No workers available, wait a bit
-            time.sleep(0.1)
+                # No workers available - check if we should wait or timeout
+                remaining_time = deadline - time.time()
+                if remaining_time <= 0:
+                    logger.error(
+                        f"Timeout waiting for available worker after {timeout}s "
+                        f"(pool size: {self.size}, all workers busy)"
+                    )
+                    return None
 
-        logger.error("Timeout waiting for available worker")
-        return None
+                # Wait efficiently for a worker to become available
+                # The Condition.wait() will be notified when a worker is returned
+                logger.debug(
+                    f"All {self.size} workers busy, waiting up to {remaining_time:.1f}s..."
+                )
+                if not self.worker_available.wait(timeout=remaining_time):
+                    # Timeout occurred
+                    logger.error(
+                        f"Timeout waiting for available worker after {timeout}s"
+                    )
+                    return None
+                # Loop back to try getting a worker again
 
     def _return_worker(self, worker: JuliaWorkerProcess) -> None:
-        """Return a worker to the available pool."""
-        with self.pool_lock:
+        """
+        Return a worker to the available pool and notify waiting threads.
+
+        Args:
+            worker: Worker to return to pool
+        """
+        with self.worker_available:  # Acquires pool_lock
             if worker.is_healthy and not self.shutdown_flag:
                 self.available_workers.append(worker)
+                logger.debug(
+                    f"Returned worker {worker.worker_id} "
+                    f"({len(self.available_workers)} available)"
+                )
+                # Notify one waiting thread that a worker is available
+                self.worker_available.notify()
 
     def execute(self, code: str, timeout: Optional[int] = None) -> CodeExecResult:
         """
@@ -482,19 +518,30 @@ class JuliaProcessPool:
         if timeout is None:
             timeout = self.timeout
 
-        # Get available worker
-        worker = self._get_available_worker()
+        # Get available worker with generous timeout to avoid premature failures
+        # Allow up to 60 seconds to wait for a worker to become available
+        worker_wait_timeout = min(60.0, timeout)
+        worker = self._get_available_worker(timeout=worker_wait_timeout)
 
         if worker is None:
+            logger.error(
+                f"Failed to acquire worker within {worker_wait_timeout}s "
+                f"(pool size: {self.size}, all workers may be busy with long-running tasks)"
+            )
             return CodeExecResult(
                 stdout="",
-                stderr="No available worker (timeout waiting for worker)",
+                stderr=f"No available worker (timeout waiting for worker after {worker_wait_timeout}s). "
+                f"All {self.size} workers are busy. Consider increasing pool size or reducing execution time.",
                 exit_code=-1,
             )
 
         try:
             # Execute code in worker
+            logger.debug(f"Executing code in worker {worker.worker_id}")
             result = worker.execute(code, timeout=timeout)
+            logger.debug(
+                f"Worker {worker.worker_id} completed (exit_code={result.exit_code})"
+            )
             return result
 
         finally:

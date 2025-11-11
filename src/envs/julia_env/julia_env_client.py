@@ -22,10 +22,15 @@ from .models import JuliaAction, JuliaObservation, JuliaState
 class JuliaEnv(HTTPEnvClient[JuliaAction, JuliaObservation]):
     """
     HTTP client for the Julia Environment.
-    
+
     This client connects to a JuliaEnvironment HTTP server and provides
     methods to interact with it: reset(), step(), and state access.
-    
+
+    The default timeout is set to 180 seconds to accommodate:
+    - Server execution timeout: 120s
+    - Process pool worker wait: 30s
+    - Network overhead: 30s buffer
+
     Example:
         >>> # Connect to a running server
         >>> client = JuliaEnv(base_url="http://localhost:8000")
@@ -37,7 +42,7 @@ class JuliaEnv(HTTPEnvClient[JuliaAction, JuliaObservation]):
         ... function multiply(a, b)
         ...     return a * b
         ... end
-        ... 
+        ...
         ... using Test
         ... @test multiply(3, 4) == 12
         ... ''')
@@ -53,6 +58,22 @@ class JuliaEnv(HTTPEnvClient[JuliaAction, JuliaObservation]):
         >>> print(result.observation.stdout)  # "4\n"
         >>> client.close()
     """
+
+    # Override default timeout to accommodate Julia execution + worker wait
+    DEFAULT_TIMEOUT = 180.0  # 120s execution + 30s worker wait + 30s buffer
+
+    def __init__(self, base_url: str, request_timeout_s: float = None, **kwargs):
+        """
+        Initialize JuliaEnv client with appropriate timeout.
+
+        Args:
+            base_url: Base URL of the Julia environment server
+            request_timeout_s: HTTP request timeout in seconds (default: 180.0)
+            **kwargs: Additional arguments passed to HTTPEnvClient
+        """
+        if request_timeout_s is None:
+            request_timeout_s = self.DEFAULT_TIMEOUT
+        super().__init__(base_url, request_timeout_s=request_timeout_s, **kwargs)
 
     def _step_payload(self, action: JuliaAction) -> Dict:
         """

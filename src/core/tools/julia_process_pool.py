@@ -87,12 +87,18 @@ class JuliaWorkerProcess:
         self._start_process()
 
     def _start_process(self) -> None:
-        """Start the Julia worker process."""
+        """Start the Julia worker process with multi-threading enabled."""
         cmd = [self.julia_path]
+
+        # Enable Julia threading for parallel computation within each worker
+        # This allows Julia to use multiple cores per process
+        # Use 2 threads per worker for optimal balance (adjust based on workload)
+        julia_threads = os.environ.get("JULIA_NUM_THREADS", "2")
 
         if self.optimization_flags:
             cmd.extend(
                 [
+                    f"--threads={julia_threads}",  # Enable multi-threading
                     "--compile=min",
                     "--optimize=2",
                     "--startup-file=no",
@@ -103,6 +109,13 @@ class JuliaWorkerProcess:
         cmd.append(self.worker_script)
 
         try:
+            # Set environment variables for Julia process
+            env = os.environ.copy()
+            env["JULIA_NUM_THREADS"] = julia_threads
+            # Disable BLAS threading to avoid oversubscription
+            env["OPENBLAS_NUM_THREADS"] = "1"
+            env["MKL_NUM_THREADS"] = "1"
+
             self.process = subprocess.Popen(
                 cmd,
                 stdin=subprocess.PIPE,
@@ -110,6 +123,7 @@ class JuliaWorkerProcess:
                 stderr=subprocess.PIPE,
                 text=True,
                 bufsize=1,  # Line buffered
+                env=env,
             )
 
             # Wait for "Julia worker ready" message on stderr
@@ -120,7 +134,7 @@ class JuliaWorkerProcess:
                 )
 
             self.is_healthy = True
-            logger.info(f"Worker {self.worker_id} started (PID: {self.process.pid})")
+            logger.info(f"Worker {self.worker_id} started (PID: {self.process.pid}, threads: {julia_threads})")
 
         except Exception as e:
             self.is_healthy = False
@@ -320,30 +334,62 @@ class JuliaProcessPool:
         self.worker_available = threading.Condition(self.pool_lock)  # Efficient waiting
         self.shutdown_flag = False
 
-        # Create worker processes with staggered initialization
-        # to avoid Juliaup lock contention when starting multiple workers
+        # Create worker processes with PARALLEL initialization for speed
+        # Use batched initialization to avoid Juliaup lock contention
         logger.info(f"Creating Julia process pool with {size} workers")
-        for i in range(size):
-            try:
-                worker = JuliaWorkerProcess(
-                    worker_id=i,
-                    julia_path=self.julia_path,
-                    worker_script=self.worker_script,
-                    optimization_flags=self.optimization_flags,
-                )
+
+        # Set JULIAUP_SKIP_VERSIONDB_UPDATE to avoid lock contention
+        os.environ["JULIAUP_SKIP_VERSIONDB_UPDATE"] = "1"
+
+        # Initialize workers in batches of 4 for optimal balance between
+        # speed (parallel) and avoiding Juliaup locks (batched)
+        batch_size = 4
+        for batch_start in range(0, size, batch_size):
+            batch_end = min(batch_start + batch_size, size)
+            batch_workers = []
+
+            # Start workers in this batch in parallel using threads
+            def create_worker(worker_id):
+                try:
+                    worker = JuliaWorkerProcess(
+                        worker_id=worker_id,
+                        julia_path=self.julia_path,
+                        worker_script=self.worker_script,
+                        optimization_flags=self.optimization_flags,
+                    )
+                    return (worker_id, worker, None)
+                except Exception as e:
+                    return (worker_id, None, e)
+
+            # Use ThreadPoolExecutor for parallel worker creation
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor(max_workers=batch_size) as executor:
+                futures = {
+                    executor.submit(create_worker, i): i
+                    for i in range(batch_start, batch_end)
+                }
+
+                for future in concurrent.futures.as_completed(futures):
+                    worker_id, worker, error = future.result()
+
+                    if error:
+                        logger.error(f"Failed to create worker {worker_id}: {error}")
+                        # Clean up partially created pool
+                        self.shutdown()
+                        raise RuntimeError(f"Failed to create worker pool: {error}")
+
+                    batch_workers.append((worker_id, worker))
+
+            # Add workers to pool in order
+            batch_workers.sort(key=lambda x: x[0])  # Sort by worker_id
+            for worker_id, worker in batch_workers:
                 self.workers.append(worker)
                 self.available_workers.append(worker)
+                logger.debug(f"Worker {worker_id} added to pool")
 
-                # Add delay between worker starts to prevent Juliaup lock contention
-                # This fixes "Juliaup configuration is locked by another process" errors
-                if i < size - 1:  # Don't delay after the last worker
-                    time.sleep(0.5)  # 500ms delay between worker starts
-
-            except Exception as e:
-                logger.error(f"Failed to create worker {i}: {e}")
-                # Clean up partially created pool
-                self.shutdown()
-                raise RuntimeError(f"Failed to create worker pool: {e}")
+            # Small delay between batches only (not between individual workers)
+            if batch_end < size:
+                time.sleep(0.1)  # 100ms between batches (down from 500ms per worker)
 
         logger.info(f"Julia process pool initialized with {len(self.workers)} workers")
 

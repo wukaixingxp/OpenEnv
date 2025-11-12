@@ -64,6 +64,7 @@ class JuliaWorkerProcess:
         julia_path: str,
         worker_script: str,
         optimization_flags: bool = True,
+        recycle_after: int = 50,
     ):
         """
         Initialize a Julia worker process.
@@ -73,6 +74,7 @@ class JuliaWorkerProcess:
             julia_path: Path to Julia executable
             worker_script: Path to julia_repl_worker.jl script
             optimization_flags: Enable Julia optimization flags
+            recycle_after: Number of executions before auto-recycling (0 = disabled)
         """
         self.worker_id = worker_id
         self.julia_path = julia_path
@@ -82,6 +84,11 @@ class JuliaWorkerProcess:
         self.is_busy = False
         self.is_healthy = True
         self.lock = threading.Lock()
+
+        # Worker recycling to prevent memory leaks
+        self.recycle_after = recycle_after
+        self.execution_count = 0
+        self.created_at = time.time()
 
         # Start the worker process
         self._start_process()
@@ -143,7 +150,7 @@ class JuliaWorkerProcess:
 
     def execute(self, code: str, timeout: int = 60) -> CodeExecResult:
         """
-        Execute Julia code in this worker process.
+        Execute Julia code in this worker process with robust timeout handling.
 
         Args:
             code: Julia code to execute
@@ -156,91 +163,134 @@ class JuliaWorkerProcess:
             if not self.is_healthy or self.process is None:
                 raise RuntimeError(f"Worker {self.worker_id} is not healthy")
 
+            # Check if worker needs recycling
+            if self.recycle_after > 0 and self.execution_count >= self.recycle_after:
+                logger.info(
+                    f"Worker {self.worker_id} reached {self.execution_count} executions "
+                    f"(limit: {self.recycle_after}) - marking for recycle"
+                )
+                self.is_healthy = False
+                raise RuntimeError(f"Worker {self.worker_id} needs recycling")
+
             self.is_busy = True
+            self.execution_count += 1
 
-            try:
-                # Send code to worker
-                self.process.stdin.write(code + "\n")
-                self.process.stdin.write(self.END_CODE + "\n")
-                self.process.stdin.flush()
+            # Use a thread to read output with a hard timeout
+            result_container = {}
+            timeout_occurred = threading.Event()
 
-                # Read response with timeout
-                start_time = time.time()
-                stdout_lines = []
-                stderr_lines = []
-                exit_code = -1
+            def read_output():
+                """Read output from worker process in separate thread."""
+                try:
+                    self.process.stdin.write(code + "\n")
+                    self.process.stdin.write(self.END_CODE + "\n")
+                    self.process.stdin.flush()
 
-                current_section = None  # Track which section we're reading
+                    stdout_lines = []
+                    stderr_lines = []
+                    exit_code = -1
+                    current_section = None
 
-                while True:
-                    # Check timeout
-                    if time.time() - start_time > timeout:
-                        logger.error(f"Worker {self.worker_id} execution timed out")
-                        self.is_healthy = False
-                        self._kill_process()
-                        return CodeExecResult(
-                            stdout="",
-                            stderr=f"Execution timed out after {timeout} seconds",
-                            exit_code=-1,
-                        )
-
-                    # Read line with timeout (use select for non-blocking read on Unix)
-                    try:
-                        line = self.process.stdout.readline()
-
-                        if not line:
-                            # EOF - process died
-                            logger.error(f"Worker {self.worker_id} died unexpectedly")
-                            self.is_healthy = False
-                            return CodeExecResult(
-                                stdout="".join(stdout_lines),
-                                stderr="Worker process died unexpectedly",
-                                exit_code=-1,
-                            )
-
-                        line = line.rstrip("\n")
-
-                        # Check for delimiters
-                        if line == self.START_OUTPUT:
-                            current_section = "stdout"
-                            continue
-                        elif line == self.START_ERROR:
-                            current_section = "stderr"
-                            continue
-                        elif line.startswith(self.EXIT_CODE_PREFIX):
-                            # Parse exit code
-                            exit_code_str = line[
-                                len(self.EXIT_CODE_PREFIX) : -3
-                            ]  # Remove prefix and ">>>"
-                            exit_code = int(exit_code_str)
-                            continue
-                        elif line == self.END_EXECUTION:
-                            # Execution complete
+                    while True:
+                        # Check if timeout occurred in main thread
+                        if timeout_occurred.is_set():
+                            logger.warning(f"Worker {self.worker_id} read interrupted by timeout")
                             break
 
-                        # Accumulate output
-                        if current_section == "stdout":
-                            stdout_lines.append(line)
-                        elif current_section == "stderr":
-                            stderr_lines.append(line)
+                        try:
+                            line = self.process.stdout.readline()
 
-                    except Exception as e:
-                        logger.error(f"Error reading from worker {self.worker_id}: {e}")
-                        self.is_healthy = False
-                        return CodeExecResult(
-                            stdout="".join(stdout_lines),
-                            stderr=f"Error reading from worker: {str(e)}",
-                            exit_code=-1,
-                        )
+                            if not line:
+                                logger.error(f"Worker {self.worker_id} died unexpectedly")
+                                result_container['error'] = "Worker process died unexpectedly"
+                                break
 
-                # Reconstruct output (add newlines back)
-                stdout_str = "\n".join(stdout_lines) + ("\n" if stdout_lines else "")
-                stderr_str = "\n".join(stderr_lines) + ("\n" if stderr_lines else "")
+                            line = line.rstrip("\n")
 
+                            # Check for delimiters
+                            if line == self.START_OUTPUT:
+                                current_section = "stdout"
+                                continue
+                            elif line == self.START_ERROR:
+                                current_section = "stderr"
+                                continue
+                            elif line.startswith(self.EXIT_CODE_PREFIX):
+                                exit_code_str = line[len(self.EXIT_CODE_PREFIX) : -3]
+                                exit_code = int(exit_code_str)
+                                continue
+                            elif line == self.END_EXECUTION:
+                                break
+
+                            # Accumulate output
+                            if current_section == "stdout":
+                                stdout_lines.append(line)
+                            elif current_section == "stderr":
+                                stderr_lines.append(line)
+
+                        except Exception as e:
+                            logger.error(f"Error reading from worker {self.worker_id}: {e}")
+                            result_container['error'] = f"Error reading from worker: {str(e)}"
+                            break
+
+                    # Store results
+                    stdout_str = "\n".join(stdout_lines) + ("\n" if stdout_lines else "")
+                    stderr_str = "\n".join(stderr_lines) + ("\n" if stderr_lines else "")
+
+                    result_container['result'] = CodeExecResult(
+                        stdout=stdout_str,
+                        stderr=stderr_str,
+                        exit_code=exit_code,
+                    )
+
+                except Exception as e:
+                    logger.error(f"Worker {self.worker_id} execution thread error: {e}")
+                    result_container['error'] = f"Execution error: {str(e)}"
+
+            try:
+                # Start reader thread
+                reader_thread = threading.Thread(target=read_output, daemon=True)
+                reader_thread.start()
+
+                # Wait for completion with timeout
+                reader_thread.join(timeout=timeout)
+
+                if reader_thread.is_alive():
+                    # TIMEOUT - forcibly kill worker and mark as unhealthy
+                    logger.error(
+                        f"Worker {self.worker_id} TIMEOUT after {timeout}s - KILLING process "
+                        f"(execution #{self.execution_count})"
+                    )
+                    timeout_occurred.set()
+                    self.is_healthy = False
+                    self._kill_process()
+
+                    # Give thread a moment to notice, then abandon it
+                    reader_thread.join(timeout=1.0)
+
+                    return CodeExecResult(
+                        stdout="",
+                        stderr=f"Worker timeout after {timeout}s - worker killed and will be recycled",
+                        exit_code=-1,
+                    )
+
+                # Thread completed - check results
+                if 'error' in result_container:
+                    self.is_healthy = False
+                    return CodeExecResult(
+                        stdout="",
+                        stderr=result_container['error'],
+                        exit_code=-1,
+                    )
+
+                if 'result' in result_container:
+                    return result_container['result']
+
+                # Unexpected - no result
+                self.is_healthy = False
                 return CodeExecResult(
-                    stdout=stdout_str,
-                    stderr=stderr_str,
-                    exit_code=exit_code,
+                    stdout="",
+                    stderr="Worker completed but returned no result",
+                    exit_code=-1,
                 )
 
             finally:
@@ -299,6 +349,7 @@ class JuliaProcessPool:
         julia_path: Optional[str] = None,
         optimization_flags: bool = True,
         auto_recover: bool = True,
+        recycle_after: int = 50,
     ):
         """
         Initialize the Julia process pool.
@@ -309,6 +360,7 @@ class JuliaProcessPool:
             julia_path: Path to Julia executable (auto-detected if None)
             optimization_flags: Enable Julia optimization flags (default: True)
             auto_recover: Automatically restart failed workers (default: True)
+            recycle_after: Recycle workers after N executions (default: 50, 0 = disabled)
 
         Raises:
             RuntimeError: If Julia executable is not found
@@ -317,6 +369,7 @@ class JuliaProcessPool:
         self.timeout = timeout
         self.optimization_flags = optimization_flags
         self.auto_recover = auto_recover
+        self.recycle_after = recycle_after
 
         # Find Julia executable
         if julia_path is None:
@@ -356,6 +409,7 @@ class JuliaProcessPool:
                         julia_path=self.julia_path,
                         worker_script=self.worker_script,
                         optimization_flags=self.optimization_flags,
+                        recycle_after=self.recycle_after,
                     )
                     return (worker_id, worker, None)
                 except Exception as e:
@@ -494,6 +548,7 @@ class JuliaProcessPool:
                                 julia_path=self.julia_path,
                                 worker_script=self.worker_script,
                                 optimization_flags=self.optimization_flags,
+                                recycle_after=self.recycle_after,
                             )
                             # Update in workers list
                             self.workers[worker.worker_id] = worker

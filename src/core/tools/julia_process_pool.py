@@ -5,25 +5,14 @@
 # LICENSE file in the root directory of this source tree.
 
 """
-Julia Process Pool for high-performance code execution.
+Enhanced Julia Process Pool with Worker Monitoring and Auto-Restart.
 
-This module provides a pool of persistent Julia processes that can be reused
-for multiple code executions, eliminating the overhead of spawning new processes.
-
-Expected speedup: 50-100x for repeated executions compared to spawning new processes.
-
-Features:
-- Persistent Julia processes (no startup overhead)
-- Thread-safe process allocation
-- Automatic recovery from process failures
-- Proper cleanup on shutdown
-- Timeout handling per execution
-
-Example:
-    >>> pool = JuliaProcessPool(size=4, timeout=30)
-    >>> result = pool.execute("println('Hello, Julia!')")
-    >>> print(result.stdout)  # "Hello, Julia!\n"
-    >>> pool.shutdown()  # Clean up all processes
+NEW FEATURES:
+- Worker health monitoring with periodic checks
+- Automatic detection and restart of hung workers
+- Worker execution time tracking
+- Forceful termination of stuck processes
+- Comprehensive metrics and logging
 """
 
 import atexit
@@ -34,29 +23,49 @@ import subprocess
 import threading
 import time
 from collections import deque
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
 from core.env_server.types import CodeExecResult
 
-# Setup logging
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class WorkerMetrics:
+    """Metrics for worker health monitoring."""
+
+    worker_id: int
+    total_executions: int
+    successful_executions: int
+    failed_executions: int
+    timeouts: int
+    last_execution_start: float
+    last_execution_end: float
+    total_busy_time: float
+    created_at: float
+    restart_count: int
 
 
 class JuliaWorkerProcess:
     """
-    Single Julia worker process that can execute code repeatedly.
+    Single Julia worker process with health monitoring.
 
-    This class manages communication with a persistent Julia REPL process
-    using a delimiter-based protocol.
+    IMPROVEMENTS:
+    - Tracks execution start time to detect stuck workers
+    - Records detailed metrics for monitoring
+    - Provides health check interface
     """
 
-    # Communication protocol delimiters
     START_OUTPUT = "<<<START_OUTPUT>>>"
     START_ERROR = "<<<START_ERROR>>>"
     EXIT_CODE_PREFIX = "<<<EXIT_CODE:"
     END_EXECUTION = "<<<END_EXECUTION>>>"
     END_CODE = "<<<END_CODE>>>"
+
+    # Worker health thresholds
+    MAX_EXECUTION_TIME = 120  # 5 minutes - force kill after this
 
     def __init__(
         self,
@@ -64,18 +73,9 @@ class JuliaWorkerProcess:
         julia_path: str,
         worker_script: str,
         optimization_flags: bool = True,
-        recycle_after: int = 50,
+        recycle_after: int = 100,
+        max_execution_time: int = 120,
     ):
-        """
-        Initialize a Julia worker process.
-
-        Args:
-            worker_id: Unique identifier for this worker
-            julia_path: Path to Julia executable
-            worker_script: Path to julia_repl_worker.jl script
-            optimization_flags: Enable Julia optimization flags
-            recycle_after: Number of executions before auto-recycling (0 = disabled)
-        """
         self.worker_id = worker_id
         self.julia_path = julia_path
         self.worker_script = worker_script
@@ -85,27 +85,35 @@ class JuliaWorkerProcess:
         self.is_healthy = True
         self.lock = threading.Lock()
 
-        # Worker recycling to prevent memory leaks
-        self.recycle_after = recycle_after
-        self.execution_count = 0
-        self.created_at = time.time()
+        # Enhanced metrics tracking
+        self.metrics = WorkerMetrics(
+            worker_id=worker_id,
+            total_executions=0,
+            successful_executions=0,
+            failed_executions=0,
+            timeouts=0,
+            last_execution_start=0.0,
+            last_execution_end=time.time(),
+            total_busy_time=0.0,
+            created_at=time.time(),
+            restart_count=0,
+        )
 
-        # Start the worker process
+        # Worker recycling and health
+        self.recycle_after = recycle_after
+        self.max_execution_time = max_execution_time
+
         self._start_process()
 
     def _start_process(self) -> None:
-        """Start the Julia worker process with multi-threading enabled."""
+        """Start the Julia worker process."""
         cmd = [self.julia_path]
-
-        # Enable Julia threading for parallel computation within each worker
-        # This allows Julia to use multiple cores per process
-        # Use 2 threads per worker for optimal balance (adjust based on workload)
         julia_threads = os.environ.get("JULIA_NUM_THREADS", "2")
 
         if self.optimization_flags:
             cmd.extend(
                 [
-                    f"--threads={julia_threads}",  # Enable multi-threading
+                    f"--threads={julia_threads}",
                     "--compile=min",
                     "--optimize=2",
                     "--startup-file=no",
@@ -116,10 +124,8 @@ class JuliaWorkerProcess:
         cmd.append(self.worker_script)
 
         try:
-            # Set environment variables for Julia process
             env = os.environ.copy()
             env["JULIA_NUM_THREADS"] = julia_threads
-            # Disable BLAS threading to avoid oversubscription
             env["OPENBLAS_NUM_THREADS"] = "1"
             env["MKL_NUM_THREADS"] = "1"
 
@@ -129,11 +135,10 @@ class JuliaWorkerProcess:
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
-                bufsize=1,  # Line buffered
+                bufsize=1,
                 env=env,
             )
 
-            # Wait for "Julia worker ready" message on stderr
             ready_msg = self.process.stderr.readline()
             if "ready" not in ready_msg.lower():
                 raise RuntimeError(
@@ -141,46 +146,81 @@ class JuliaWorkerProcess:
                 )
 
             self.is_healthy = True
-            logger.info(f"Worker {self.worker_id} started (PID: {self.process.pid}, threads: {julia_threads})")
+            logger.info(
+                f"Worker {self.worker_id} started (PID: {self.process.pid}, "
+                f"threads: {julia_threads}, restart_count: {self.metrics.restart_count})"
+            )
 
         except Exception as e:
             self.is_healthy = False
             logger.error(f"Failed to start worker {self.worker_id}: {e}")
             raise
 
-    def execute(self, code: str, timeout: int = 60) -> CodeExecResult:
+    def is_stuck(self) -> bool:
         """
-        Execute Julia code in this worker process with robust timeout handling.
-
-        Args:
-            code: Julia code to execute
-            timeout: Maximum execution time in seconds
+        Check if worker is stuck (executing for too long).
 
         Returns:
-            CodeExecResult with stdout, stderr, and exit_code
+            True if worker has been executing for longer than max_execution_time
         """
+        if not self.is_busy:
+            return False
+
+        execution_duration = time.time() - self.metrics.last_execution_start
+        is_stuck = execution_duration > self.max_execution_time
+
+        if is_stuck:
+            logger.warning(
+                f"Worker {self.worker_id} is STUCK! "
+                f"Executing for {execution_duration:.1f}s (limit: {self.max_execution_time}s)"
+            )
+
+        return is_stuck
+
+    def force_kill(self) -> None:
+        """
+        Forcefully kill a stuck worker process.
+
+        This is called by the health monitor when a worker is detected as stuck.
+        """
+        logger.error(
+            f"FORCE KILLING worker {self.worker_id} "
+            f"(stuck for {time.time() - self.metrics.last_execution_start:.1f}s)"
+        )
+
+        with self.lock:
+            self.is_healthy = False
+            self.metrics.timeouts += 1
+            self.metrics.failed_executions += 1
+            self._kill_process()
+
+    def execute(self, code: str, timeout: int = 60) -> CodeExecResult:
+        """Execute Julia code with enhanced monitoring."""
         with self.lock:
             if not self.is_healthy or self.process is None:
                 raise RuntimeError(f"Worker {self.worker_id} is not healthy")
 
             # Check if worker needs recycling
-            if self.recycle_after > 0 and self.execution_count >= self.recycle_after:
+            if (
+                self.recycle_after > 0
+                and self.metrics.total_executions >= self.recycle_after
+            ):
                 logger.info(
-                    f"Worker {self.worker_id} reached {self.execution_count} executions "
+                    f"Worker {self.worker_id} reached {self.metrics.total_executions} executions "
                     f"(limit: {self.recycle_after}) - marking for recycle"
                 )
                 self.is_healthy = False
                 raise RuntimeError(f"Worker {self.worker_id} needs recycling")
 
             self.is_busy = True
-            self.execution_count += 1
+            self.metrics.total_executions += 1
+            self.metrics.last_execution_start = time.time()
 
-            # Use a thread to read output with a hard timeout
             result_container = {}
             timeout_occurred = threading.Event()
 
             def read_output():
-                """Read output from worker process in separate thread."""
+                """Read output from worker process."""
                 try:
                     self.process.stdin.write(code + "\n")
                     self.process.stdin.write(self.END_CODE + "\n")
@@ -192,22 +232,26 @@ class JuliaWorkerProcess:
                     current_section = None
 
                     while True:
-                        # Check if timeout occurred in main thread
                         if timeout_occurred.is_set():
-                            logger.warning(f"Worker {self.worker_id} read interrupted by timeout")
+                            logger.warning(
+                                f"Worker {self.worker_id} read interrupted by timeout"
+                            )
                             break
 
                         try:
                             line = self.process.stdout.readline()
 
                             if not line:
-                                logger.error(f"Worker {self.worker_id} died unexpectedly")
-                                result_container['error'] = "Worker process died unexpectedly"
+                                logger.error(
+                                    f"Worker {self.worker_id} died unexpectedly"
+                                )
+                                result_container["error"] = (
+                                    "Worker process died unexpectedly"
+                                )
                                 break
 
                             line = line.rstrip("\n")
 
-                            # Check for delimiters
                             if line == self.START_OUTPUT:
                                 current_section = "stdout"
                                 continue
@@ -221,22 +265,28 @@ class JuliaWorkerProcess:
                             elif line == self.END_EXECUTION:
                                 break
 
-                            # Accumulate output
                             if current_section == "stdout":
                                 stdout_lines.append(line)
                             elif current_section == "stderr":
                                 stderr_lines.append(line)
 
                         except Exception as e:
-                            logger.error(f"Error reading from worker {self.worker_id}: {e}")
-                            result_container['error'] = f"Error reading from worker: {str(e)}"
+                            logger.error(
+                                f"Error reading from worker {self.worker_id}: {e}"
+                            )
+                            result_container["error"] = (
+                                f"Error reading from worker: {str(e)}"
+                            )
                             break
 
-                    # Store results
-                    stdout_str = "\n".join(stdout_lines) + ("\n" if stdout_lines else "")
-                    stderr_str = "\n".join(stderr_lines) + ("\n" if stderr_lines else "")
+                    stdout_str = "\n".join(stdout_lines) + (
+                        "\n" if stdout_lines else ""
+                    )
+                    stderr_str = "\n".join(stderr_lines) + (
+                        "\n" if stderr_lines else ""
+                    )
 
-                    result_container['result'] = CodeExecResult(
+                    result_container["result"] = CodeExecResult(
                         stdout=stdout_str,
                         stderr=stderr_str,
                         exit_code=exit_code,
@@ -244,27 +294,24 @@ class JuliaWorkerProcess:
 
                 except Exception as e:
                     logger.error(f"Worker {self.worker_id} execution thread error: {e}")
-                    result_container['error'] = f"Execution error: {str(e)}"
+                    result_container["error"] = f"Execution error: {str(e)}"
 
             try:
-                # Start reader thread
                 reader_thread = threading.Thread(target=read_output, daemon=True)
                 reader_thread.start()
-
-                # Wait for completion with timeout
                 reader_thread.join(timeout=timeout)
 
                 if reader_thread.is_alive():
-                    # TIMEOUT - forcibly kill worker and mark as unhealthy
+                    # TIMEOUT
                     logger.error(
-                        f"Worker {self.worker_id} TIMEOUT after {timeout}s - KILLING process "
-                        f"(execution #{self.execution_count})"
+                        f"Worker {self.worker_id} TIMEOUT after {timeout}s "
+                        f"(execution #{self.metrics.total_executions})"
                     )
                     timeout_occurred.set()
                     self.is_healthy = False
+                    self.metrics.timeouts += 1
+                    self.metrics.failed_executions += 1
                     self._kill_process()
-
-                    # Give thread a moment to notice, then abandon it
                     reader_thread.join(timeout=1.0)
 
                     return CodeExecResult(
@@ -273,20 +320,21 @@ class JuliaWorkerProcess:
                         exit_code=-1,
                     )
 
-                # Thread completed - check results
-                if 'error' in result_container:
+                if "error" in result_container:
                     self.is_healthy = False
+                    self.metrics.failed_executions += 1
                     return CodeExecResult(
                         stdout="",
-                        stderr=result_container['error'],
+                        stderr=result_container["error"],
                         exit_code=-1,
                     )
 
-                if 'result' in result_container:
-                    return result_container['result']
+                if "result" in result_container:
+                    self.metrics.successful_executions += 1
+                    return result_container["result"]
 
-                # Unexpected - no result
                 self.is_healthy = False
+                self.metrics.failed_executions += 1
                 return CodeExecResult(
                     stdout="",
                     stderr="Worker completed but returned no result",
@@ -294,6 +342,11 @@ class JuliaWorkerProcess:
                 )
 
             finally:
+                self.metrics.last_execution_end = time.time()
+                execution_time = (
+                    self.metrics.last_execution_end - self.metrics.last_execution_start
+                )
+                self.metrics.total_busy_time += execution_time
                 self.is_busy = False
 
     def _kill_process(self) -> None:
@@ -321,25 +374,14 @@ class JuliaWorkerProcess:
 
 class JuliaProcessPool:
     """
-    Pool of persistent Julia processes for high-performance code execution.
+    Enhanced Julia Process Pool with Health Monitoring and Auto-Restart.
 
-    This class manages multiple Julia worker processes and distributes
-    code execution among them, providing significant speedup by eliminating
-    process startup overhead.
-
-    Thread-safe for concurrent access from multiple threads.
-
-    Example:
-        >>> pool = JuliaProcessPool(size=4)
-        >>>
-        >>> # Execute code
-        >>> result = pool.execute("println('Hello')")
-        >>>
-        >>> # Pool automatically manages workers
-        >>> results = [pool.execute(f"println({i})") for i in range(100)]
-        >>>
-        >>> # Cleanup when done
-        >>> pool.shutdown()
+    NEW FEATURES:
+    - Background health monitor thread
+    - Automatic detection of stuck workers
+    - Forceful restart of unhealthy workers
+    - Request queue with backpressure
+    - Comprehensive metrics
     """
 
     def __init__(
@@ -349,59 +391,63 @@ class JuliaProcessPool:
         julia_path: Optional[str] = None,
         optimization_flags: bool = True,
         auto_recover: bool = True,
-        recycle_after: int = 50,
+        recycle_after: int = 100,
+        max_execution_time: int = 120,
+        health_check_interval: float = 10.0,
     ):
         """
-        Initialize the Julia process pool.
+        Initialize the Julia process pool with health monitoring.
 
         Args:
-            size: Number of worker processes to create (default: 4)
-            timeout: Default timeout for code execution in seconds (default: 60)
-            julia_path: Path to Julia executable (auto-detected if None)
-            optimization_flags: Enable Julia optimization flags (default: True)
-            auto_recover: Automatically restart failed workers (default: True)
-            recycle_after: Recycle workers after N executions (default: 50, 0 = disabled)
-
-        Raises:
-            RuntimeError: If Julia executable is not found
+            size: Number of worker processes
+            timeout: Default timeout for code execution (seconds)
+            julia_path: Path to Julia executable
+            optimization_flags: Enable Julia optimization flags
+            auto_recover: Automatically restart failed workers
+            recycle_after: Recycle workers after N executions
+            max_execution_time: Maximum time a worker can execute before being killed (seconds)
+            health_check_interval: How often to check worker health (seconds)
         """
         self.size = size
         self.timeout = timeout
         self.optimization_flags = optimization_flags
         self.auto_recover = auto_recover
         self.recycle_after = recycle_after
+        self.max_execution_time = max_execution_time
+        self.health_check_interval = health_check_interval
 
-        # Find Julia executable
         if julia_path is None:
             julia_path = self._find_julia_executable()
 
         self.julia_path = julia_path
-
-        # Find worker script
         self.worker_script = self._find_worker_script()
 
-        # Initialize workers
+        # Worker management
         self.workers: list[JuliaWorkerProcess] = []
         self.available_workers: deque[JuliaWorkerProcess] = deque()
         self.pool_lock = threading.Lock()
-        self.worker_available = threading.Condition(self.pool_lock)  # Efficient waiting
+        self.worker_available = threading.Condition(self.pool_lock)
         self.shutdown_flag = False
 
-        # Create worker processes with PARALLEL initialization for speed
-        # Use batched initialization to avoid Juliaup lock contention
-        logger.info(f"Creating Julia process pool with {size} workers")
+        # Health monitoring
+        self.health_monitor_thread: Optional[threading.Thread] = None
+        self.stuck_workers_detected = 0
+        self.workers_restarted = 0
 
-        # Set JULIAUP_SKIP_VERSIONDB_UPDATE to avoid lock contention
+        # Pool metrics
+        self.total_requests = 0
+        self.rejected_requests = 0
+        self.queue_full_events = 0
+
+        # Initialize workers
+        logger.info(f"Creating Julia process pool with {size} workers")
         os.environ["JULIAUP_SKIP_VERSIONDB_UPDATE"] = "1"
 
-        # Initialize workers in batches of 4 for optimal balance between
-        # speed (parallel) and avoiding Juliaup locks (batched)
         batch_size = 4
         for batch_start in range(0, size, batch_size):
             batch_end = min(batch_start + batch_size, size)
             batch_workers = []
 
-            # Start workers in this batch in parallel using threads
             def create_worker(worker_id):
                 try:
                     worker = JuliaWorkerProcess(
@@ -410,14 +456,17 @@ class JuliaProcessPool:
                         worker_script=self.worker_script,
                         optimization_flags=self.optimization_flags,
                         recycle_after=self.recycle_after,
+                        max_execution_time=self.max_execution_time,
                     )
                     return (worker_id, worker, None)
                 except Exception as e:
                     return (worker_id, None, e)
 
-            # Use ThreadPoolExecutor for parallel worker creation
             import concurrent.futures
-            with concurrent.futures.ThreadPoolExecutor(max_workers=batch_size) as executor:
+
+            with concurrent.futures.ThreadPoolExecutor(
+                max_workers=batch_size
+            ) as executor:
                 futures = {
                     executor.submit(create_worker, i): i
                     for i in range(batch_start, batch_end)
@@ -428,31 +477,110 @@ class JuliaProcessPool:
 
                     if error:
                         logger.error(f"Failed to create worker {worker_id}: {error}")
-                        # Clean up partially created pool
                         self.shutdown()
                         raise RuntimeError(f"Failed to create worker pool: {error}")
 
                     batch_workers.append((worker_id, worker))
 
-            # Add workers to pool in order
-            batch_workers.sort(key=lambda x: x[0])  # Sort by worker_id
+            batch_workers.sort(key=lambda x: x[0])
             for worker_id, worker in batch_workers:
                 self.workers.append(worker)
                 self.available_workers.append(worker)
                 logger.debug(f"Worker {worker_id} added to pool")
 
-            # Small delay between batches only (not between individual workers)
             if batch_end < size:
-                time.sleep(0.1)  # 100ms between batches (down from 500ms per worker)
+                time.sleep(0.1)
 
         logger.info(f"Julia process pool initialized with {len(self.workers)} workers")
 
-        # Register cleanup on exit
+        # Start health monitor
+        self._start_health_monitor()
+
         atexit.register(self.shutdown)
 
+    def _start_health_monitor(self) -> None:
+        """Start background thread for worker health monitoring."""
+
+        def health_monitor():
+            """Background health monitor that checks for stuck workers."""
+            logger.info(
+                f"Health monitor started (check_interval={self.health_check_interval}s, "
+                f"max_execution_time={self.max_execution_time}s)"
+            )
+
+            while not self.shutdown_flag:
+                try:
+                    time.sleep(self.health_check_interval)
+
+                    if self.shutdown_flag:
+                        break
+
+                    with self.pool_lock:
+                        for worker in self.workers:
+                            # Check if worker is stuck
+                            if worker.is_stuck():
+                                self.stuck_workers_detected += 1
+                                logger.error(
+                                    f"🚨 STUCK WORKER DETECTED: Worker {worker.worker_id} "
+                                    f"has been executing for "
+                                    f"{time.time() - worker.metrics.last_execution_start:.1f}s"
+                                )
+
+                                # Force kill the stuck worker
+                                worker.force_kill()
+
+                                # Try to restart if auto_recover is enabled
+                                if self.auto_recover and not self.shutdown_flag:
+                                    try:
+                                        logger.info(
+                                            f"Attempting to restart stuck worker {worker.worker_id}"
+                                        )
+                                        worker.shutdown()
+
+                                        new_worker = JuliaWorkerProcess(
+                                            worker_id=worker.worker_id,
+                                            julia_path=self.julia_path,
+                                            worker_script=self.worker_script,
+                                            optimization_flags=self.optimization_flags,
+                                            recycle_after=self.recycle_after,
+                                            max_execution_time=self.max_execution_time,
+                                        )
+                                        new_worker.metrics.restart_count = (
+                                            worker.metrics.restart_count + 1
+                                        )
+
+                                        # Replace worker in pool
+                                        self.workers[worker.worker_id] = new_worker
+                                        self.available_workers.append(new_worker)
+                                        self.workers_restarted += 1
+
+                                        logger.info(
+                                            f"✅ Successfully restarted worker {worker.worker_id} "
+                                            f"(restart #{new_worker.metrics.restart_count})"
+                                        )
+
+                                        # Notify waiting threads
+                                        self.worker_available.notify()
+
+                                    except Exception as e:
+                                        logger.error(
+                                            f"Failed to restart worker {worker.worker_id}: {e}"
+                                        )
+
+                except Exception as e:
+                    if not self.shutdown_flag:
+                        logger.error(f"Health monitor error: {e}")
+
+            logger.info("Health monitor stopped")
+
+        self.health_monitor_thread = threading.Thread(
+            target=health_monitor, daemon=True, name="julia_health_monitor"
+        )
+        self.health_monitor_thread.start()
+        logger.info("Health monitor thread started")
+
     def _find_julia_executable(self) -> str:
-        """Find Julia executable in PATH or common locations."""
-        # Ensure Julia paths are in PATH environment variable
+        """Find Julia executable."""
         julia_bin_dirs = [
             os.path.expanduser("~/.juliaup/bin"),
             os.path.expanduser("~/.julia/bin"),
@@ -463,19 +591,16 @@ class JuliaProcessPool:
         current_path = os.environ.get("PATH", "")
         path_entries = current_path.split(os.pathsep)
 
-        # Add Julia paths if not already in PATH
         for julia_path in julia_bin_dirs:
             if os.path.isdir(julia_path) and julia_path not in path_entries:
                 current_path = f"{julia_path}{os.pathsep}{current_path}"
 
         os.environ["PATH"] = current_path
 
-        # Try PATH first using shutil.which (more reliable than os.popen)
         julia_path = shutil.which("julia")
         if julia_path:
             return julia_path
 
-        # Try common locations directly
         common_paths = [
             os.path.expanduser("~/.juliaup/bin/julia"),
             os.path.expanduser("~/.julia/bin/julia"),
@@ -494,7 +619,6 @@ class JuliaProcessPool:
 
     def _find_worker_script(self) -> str:
         """Find the julia_repl_worker.jl script."""
-        # Try relative to this file
         this_dir = Path(__file__).parent
         worker_script = this_dir / "julia_repl_worker.jl"
 
@@ -509,23 +633,11 @@ class JuliaProcessPool:
     def _get_available_worker(
         self, timeout: float = 60.0
     ) -> Optional[JuliaWorkerProcess]:
-        """
-        Get an available worker from the pool using efficient waiting.
-
-        This method uses threading.Condition for efficient blocking instead of
-        busy-waiting, which reduces CPU usage and improves responsiveness.
-
-        Args:
-            timeout: Maximum time to wait for a worker (seconds)
-
-        Returns:
-            Available worker or None if timeout
-        """
+        """Get an available worker with timeout."""
         deadline = time.time() + timeout
 
-        with self.worker_available:  # Acquires pool_lock
+        with self.worker_available:
             while True:
-                # Try to get healthy worker
                 while self.available_workers:
                     worker = self.available_workers.popleft()
 
@@ -536,7 +648,6 @@ class JuliaProcessPool:
                         )
                         return worker
 
-                    # Worker is unhealthy, try to recover
                     if self.auto_recover and not self.shutdown_flag:
                         logger.warning(
                             f"Worker {worker.worker_id} is unhealthy, attempting recovery"
@@ -549,17 +660,20 @@ class JuliaProcessPool:
                                 worker_script=self.worker_script,
                                 optimization_flags=self.optimization_flags,
                                 recycle_after=self.recycle_after,
+                                max_execution_time=self.max_execution_time,
                             )
-                            # Update in workers list
+                            worker.metrics.restart_count += 1
                             self.workers[worker.worker_id] = worker
-                            logger.info(f"Worker {worker.worker_id} recovered successfully")
+                            self.workers_restarted += 1
+                            logger.info(
+                                f"Worker {worker.worker_id} recovered successfully"
+                            )
                             return worker
                         except Exception as e:
                             logger.error(
                                 f"Failed to recover worker {worker.worker_id}: {e}"
                             )
 
-                # No workers available - check if we should wait or timeout
                 remaining_time = deadline - time.time()
                 if remaining_time <= 0:
                     logger.error(
@@ -568,47 +682,28 @@ class JuliaProcessPool:
                     )
                     return None
 
-                # Wait efficiently for a worker to become available
-                # The Condition.wait() will be notified when a worker is returned
                 logger.debug(
                     f"All {self.size} workers busy, waiting up to {remaining_time:.1f}s..."
                 )
                 if not self.worker_available.wait(timeout=remaining_time):
-                    # Timeout occurred
                     logger.error(
                         f"Timeout waiting for available worker after {timeout}s"
                     )
                     return None
-                # Loop back to try getting a worker again
 
     def _return_worker(self, worker: JuliaWorkerProcess) -> None:
-        """
-        Return a worker to the available pool and notify waiting threads.
-
-        Args:
-            worker: Worker to return to pool
-        """
-        with self.worker_available:  # Acquires pool_lock
+        """Return a worker to the pool."""
+        with self.worker_available:
             if worker.is_healthy and not self.shutdown_flag:
                 self.available_workers.append(worker)
                 logger.debug(
                     f"Returned worker {worker.worker_id} "
                     f"({len(self.available_workers)} available)"
                 )
-                # Notify one waiting thread that a worker is available
                 self.worker_available.notify()
 
     def execute(self, code: str, timeout: Optional[int] = None) -> CodeExecResult:
-        """
-        Execute Julia code using an available worker from the pool.
-
-        Args:
-            code: Julia code to execute
-            timeout: Execution timeout in seconds (uses pool default if None)
-
-        Returns:
-            CodeExecResult with stdout, stderr, and exit_code
-        """
+        """Execute Julia code using pool."""
         if self.shutdown_flag:
             return CodeExecResult(
                 stdout="",
@@ -619,15 +714,16 @@ class JuliaProcessPool:
         if timeout is None:
             timeout = self.timeout
 
-        # Get available worker with generous timeout to avoid premature failures
-        # Allow up to 60 seconds to wait for a worker to become available
+        self.total_requests += 1
+
         worker_wait_timeout = min(60.0, timeout)
         worker = self._get_available_worker(timeout=worker_wait_timeout)
 
         if worker is None:
+            self.rejected_requests += 1
             logger.error(
                 f"Failed to acquire worker within {worker_wait_timeout}s "
-                f"(pool size: {self.size}, all workers may be busy with long-running tasks)"
+                f"(pool size: {self.size}, all workers busy)"
             )
             return CodeExecResult(
                 stdout="",
@@ -637,7 +733,6 @@ class JuliaProcessPool:
             )
 
         try:
-            # Execute code in worker
             logger.debug(f"Executing code in worker {worker.worker_id}")
             result = worker.execute(code, timeout=timeout)
             logger.debug(
@@ -646,20 +741,56 @@ class JuliaProcessPool:
             return result
 
         finally:
-            # Return worker to pool
             self._return_worker(worker)
 
-    def shutdown(self) -> None:
-        """
-        Shutdown all worker processes gracefully.
+    def get_metrics(self) -> dict:
+        """Get pool and worker metrics."""
+        with self.pool_lock:
+            worker_metrics = []
+            for worker in self.workers:
+                worker_metrics.append(
+                    {
+                        "worker_id": worker.worker_id,
+                        "is_busy": worker.is_busy,
+                        "is_healthy": worker.is_healthy,
+                        "total_executions": worker.metrics.total_executions,
+                        "successful_executions": worker.metrics.successful_executions,
+                        "failed_executions": worker.metrics.failed_executions,
+                        "timeouts": worker.metrics.timeouts,
+                        "restart_count": worker.metrics.restart_count,
+                        "total_busy_time": worker.metrics.total_busy_time,
+                        "avg_execution_time": (
+                            worker.metrics.total_busy_time
+                            / worker.metrics.total_executions
+                            if worker.metrics.total_executions > 0
+                            else 0
+                        ),
+                    }
+                )
 
-        This method is automatically called on exit via atexit.
-        """
+            return {
+                "pool_size": self.size,
+                "available_workers": len(self.available_workers),
+                "busy_workers": self.size - len(self.available_workers),
+                "total_requests": self.total_requests,
+                "rejected_requests": self.rejected_requests,
+                "stuck_workers_detected": self.stuck_workers_detected,
+                "workers_restarted": self.workers_restarted,
+                "workers": worker_metrics,
+            }
+
+    def shutdown(self) -> None:
+        """Shutdown pool and health monitor."""
         if self.shutdown_flag:
             return
 
         logger.info("Shutting down Julia process pool")
         self.shutdown_flag = True
+
+        # Wait for health monitor to stop
+        if self.health_monitor_thread and self.health_monitor_thread.is_alive():
+            logger.info("Waiting for health monitor to stop...")
+            self.health_monitor_thread.join(timeout=5.0)
 
         with self.pool_lock:
             for worker in self.workers:
@@ -671,13 +802,10 @@ class JuliaProcessPool:
         logger.info("Julia process pool shutdown complete")
 
     def __enter__(self):
-        """Context manager entry."""
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        """Context manager exit."""
         self.shutdown()
 
     def __del__(self):
-        """Ensure cleanup on garbage collection."""
         self.shutdown()

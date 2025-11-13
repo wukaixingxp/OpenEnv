@@ -1,0 +1,123 @@
+{
+  "connect4": {
+    "env_key": "connect4",
+    "name": "connect4_env",
+    "version": "0.1.0",
+    "description": "connect4_env environment",
+    "client_module": "envs.connect4_env.client",
+    "client_class": "Connect4Env",
+    "action_module": "envs.connect4_env.client",
+    "action_class": "Connect4Action",
+    "env_path": "/Users/kaiwu/work/kaiwu/OpenEnv/src/envs/connect4_env"
+  },
+  "git": {
+    "env_key": "git",
+    "name": "git_env",
+    "version": "0.1.0",
+    "description": "git_env environment",
+    "client_module": "envs.git_env.client",
+    "client_class": "GitEnv",
+    "action_module": "envs.git_env.client",
+    "action_class": "GitAction",
+    "env_path": "/Users/kaiwu/work/kaiwu/OpenEnv/src/envs/git_env"
+  },
+  "finrl": {
+    "env_key": "finrl",
+    "name": "finrl_env",
+    "version": "0.1.0",
+    "description": "finrl_env environment",
+    "client_module": "envs.finrl_env.client",
+    "client_class": "FinrlEnv",
+    "action_module": "envs.finrl_env.client",
+    "action_class": "FinrlAction",
+    "env_path": "/Users/kaiwu/work/kaiwu/OpenEnv/src/envs/finrl_env"
+  },
+  "textarena": {
+    "env_key": "textarena",
+    "name": "textarena_env",
+    "version": "0.1.0",
+    "description": "textarena_env environment",
+    "client_module": "envs.textarena_env.client",
+    "client_class": "TextarenaEnv",
+    "action_module": "envs.textarena_env.client",
+    "action_class": "TextarenaAction",
+    "env_path": "/Users/kaiwu/work/kaiwu/OpenEnv/src/envs/textarena_env"
+  },
+  "echo": {
+    "env_key": "echo",
+    "name": "echo_env",
+    "version": "0.1.0",
+    "description": "echo_env environment",
+    "client_module": "envs.echo_env.client",
+    "client_class": "EchoEnv",
+    "action_module": "envs.echo_env.client",
+    "action_class": "EchoAction",
+    "env_path": "/Users/kaiwu/work/kaiwu/OpenEnv/src/envs/echo_env"
+  },
+  "browsergym": {
+    "env_key": "browsergym",
+    "name": "browsergym_env",
+    "version": "0.1.0",
+    "description": "browsergym_env environment",
+    "client_module": "envs.browsergym_env.client",
+    "client_class": "BrowsergymEnv",
+    "action_module": "envs.browsergym_env.client",
+    "action_class": "BrowsergymAction",
+    "env_path": "/Users/kaiwu/work/kaiwu/OpenEnv/src/envs/browsergym_env"
+  },
+  "dipg_safety": {
+    "env_key": "dipg_safety",
+    "name": "dipg_safety_env",
+    "version": "0.1.0",
+    "description": "dipg_safety_env environment",
+    "client_module": "envs.dipg_safety_env.client",
+    "client_class": "DipgSafetyEnv",
+    "action_module": "envs.dipg_safety_env.client",
+    "action_class": "DipgSafetyAction",
+    "env_path": "/Users/kaiwu/work/kaiwu/OpenEnv/src/envs/dipg_safety_env"
+  },
+  "sumo_rl": {
+    "env_key": "sumo_rl",
+    "name": "sumo_rl_env",
+    "version": "0.1.0",
+    "description": "sumo_rl_env environment",
+    "client_module": "envs.sumo_rl_env.client",
+    "client_class": "SumoRlEnv",
+    "action_module": "envs.sumo_rl_env.client",
+    "action_class": "SumoRlAction",
+    "env_path": "/Users/kaiwu/work/kaiwu/OpenEnv/src/envs/sumo_rl_env"
+  },
+  "atari": {
+    "env_key": "atari",
+    "name": "atari_env",
+    "version": "0.1.0",
+    "description": "atari_env environment",
+    "client_module": "envs.atari_env.client",
+    "client_class": "AtariEnv",
+    "action_module": "envs.atari_env.client",
+    "action_class": "AtariAction",
+    "env_path": "/Users/kaiwu/work/kaiwu/OpenEnv/src/envs/atari_env"
+  },
+  "chat": {
+    "env_key": "chat",
+    "name": "chat_env",
+    "version": "0.1.0",
+    "description": "chat_env environment",
+    "client_module": "envs.chat_env.client",
+    "client_class": "ChatEnv",
+    "action_module": "envs.chat_env.client",
+    "action_class": "ChatAction",
+    "env_path": "/Users/kaiwu/work/kaiwu/OpenEnv/src/envs/chat_env"
+  },
+  "openspiel": {
+    "env_key": "openspiel",
+    "name": "openspiel_env",
+    "version": "0.1.0",
+    "description": "openspiel_env environment",
+    "client_module": "envs.openspiel_env.client",
+    "client_class": "OpenspielEnv",
+    "action_module": "envs.openspiel_env.client",
+    "action_class": "OpenspielAction",
+    "env_path": "/Users/kaiwu/work/kaiwu/OpenEnv/src/envs/openspiel_env"
+  }
+}

@@ -36,8 +36,10 @@ from __future__ import annotations
 
 import importlib
 import re
+import warnings
 from typing import Type
 
+from ._discovery import get_environment_info, discover_environments
 from ._registry import get_env_info
 
 
@@ -156,17 +158,60 @@ class AutoAction:
         """
         Dynamically import and return the Action class for an environment.
 
+        Uses auto-discovery first, then falls back to manual registry for
+        backward compatibility.
+
         Args:
-            env_key: Environment key from registry (e.g., "coding", "atari")
+            env_key: Environment key (e.g., "coding", "atari")
 
         Returns:
             Action class type (not an instance)
 
         Raises:
             ImportError: If module or class cannot be imported
-            ValueError: If environment not found in registry
+            ValueError: If environment not found
         """
-        env_info = get_env_info(env_key)
+        # Try auto-discovery first
+        discovered_info = get_environment_info(env_key)
+
+        if discovered_info is not None:
+            # Use discovered environment
+            try:
+                return discovered_info.get_action_class()
+            except ImportError as e:
+                # If discovery finds it but can't load it, raise the error
+                raise ImportError(
+                    f"Found environment '{env_key}' but failed to load action class: {e}"
+                ) from e
+
+        # Fall back to manual registry (deprecated)
+        warnings.warn(
+            f"Action for environment '{env_key}' not found via auto-discovery, "
+            f"falling back to manual registry. The manual registry is deprecated and "
+            f"will be removed in a future version.",
+            DeprecationWarning,
+            stacklevel=3,
+        )
+
+        try:
+            env_info = get_env_info(env_key)
+        except ValueError:
+            # Not in registry either - provide helpful error
+            from difflib import get_close_matches
+
+            # Get all available environments from discovery
+            discovered = discover_environments()
+            suggestions = get_close_matches(
+                env_key, list(discovered.keys()), n=3, cutoff=0.6
+            )
+            suggestion_str = ""
+            if suggestions:
+                suggestion_str = f" Did you mean: {', '.join(suggestions)}?"
+
+            raise ValueError(
+                f"Unknown environment '{env_key}'. "
+                f"Available environments: {', '.join(sorted(discovered.keys()))}.{suggestion_str}"
+            )
 
         module_path = env_info["module"]
         action_class_name = env_info["action_class"]
@@ -263,8 +308,7 @@ class AutoAction:
         """
         Get information about the Action class for an environment.
 
-        This is a convenience method to get details about what fields the
-        Action class expects without having to instantiate it.
+        Uses auto-discovery first, then falls back to manual registry.
 
         Args:
             env_name: Environment name (e.g., "coding", "atari")
@@ -275,9 +319,29 @@ class AutoAction:
         Example:
             >>> info = AutoAction.get_action_info("coding")
             >>> print(info["action_class"])  # "CodeAction"
-            >>> print(info["module"])  # "envs.coding_env"
+            >>> print(info["module"])  # "envs.coding_env.client"
         """
         env_key = env_name.lower()
+
+        # Try discovery first
+        discovered_info = get_environment_info(env_key)
+
+        if discovered_info is not None:
+            return {
+                "action_class": discovered_info.action_class_name,
+                "module": discovered_info.action_module_path,
+                "env_class": discovered_info.client_class_name,
+                "description": discovered_info.description,
+            }
+
+        # Fall back to registry (deprecated)
+        warnings.warn(
+            f"Action info for environment '{env_key}' retrieved from manual registry. "
+            f"The manual registry is deprecated.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+
         env_info = get_env_info(env_key)
 
         return {
@@ -292,7 +356,7 @@ class AutoAction:
         """
         Print a list of all available Action classes.
 
-        This is a convenience method for discovering what Action classes are available.
+        Uses auto-discovery to find all environments and their action classes.
 
         Example:
             >>> AutoAction.list_actions()
@@ -303,19 +367,42 @@ class AutoAction:
             echo         : EchoAction       (Simple echo test environment)
             ...
         """
-        from ._registry import ENV_REGISTRY
+        # Use discovery to get all environments
+        discovered = discover_environments()
 
-        print("Available Action Classes:")
-        print("-" * 70)
+        # Fall back to registry if discovery is empty
+        if not discovered:
+            warnings.warn(
+                "No environments found via auto-discovery, falling back to manual registry. "
+                "This is deprecated.",
+                DeprecationWarning,
+            )
+            from ._registry import ENV_REGISTRY
 
-        for env_key in sorted(ENV_REGISTRY.keys()):
-            info = ENV_REGISTRY[env_key]
-            action_class = info["action_class"]
-            description = info["description"]
-            print(f"  {env_key:<15}: {action_class:<20} ({description})")
+            print("Available Action Classes:")
+            print("-" * 70)
 
-        print("-" * 70)
-        print(f"Total: {len(ENV_REGISTRY)} Action classes")
+            for env_key in sorted(ENV_REGISTRY.keys()):
+                info = ENV_REGISTRY[env_key]
+                action_class = info["action_class"]
+                description = info["description"]
+                print(f"  {env_key:<15}: {action_class:<20} ({description})")
+
+            print("-" * 70)
+            print(f"Total: {len(ENV_REGISTRY)} Action classes")
+        else:
+            print("Available Action Classes:")
+            print("-" * 70)
+
+            for env_key in sorted(discovered.keys()):
+                info = discovered[env_key]
+                action_class = info.action_class_name
+                description = info.description
+                print(f"  {env_key:<15}: {action_class:<20} ({description})")
+
+            print("-" * 70)
+            print(f"Total: {len(discovered)} Action classes")
+
         print("\nUsage:")
         print("  ActionClass = AutoAction.from_env('env-name')")
         print("  # or")

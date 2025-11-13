@@ -35,8 +35,10 @@ from __future__ import annotations
 
 import importlib
 import re
+import warnings
 from typing import Any, Optional, TYPE_CHECKING
 
+from ._discovery import get_environment_info, discover_environments
 from ._registry import get_env_info, list_available_environments
 
 if TYPE_CHECKING:
@@ -165,16 +167,61 @@ class AutoEnv:
         """
         Dynamically import and return the environment class.
 
+        Uses auto-discovery first, then falls back to manual registry for
+        backward compatibility.
+
         Args:
-            env_key: Environment key from registry
+            env_key: Environment key (e.g., "coding", "echo")
 
         Returns:
             Environment class type
 
         Raises:
             ImportError: If module or class cannot be imported
+            ValueError: If environment not found
         """
-        env_info = get_env_info(env_key)
+        # Try auto-discovery first
+        discovered_info = get_environment_info(env_key)
+
+        if discovered_info is not None:
+            # Use discovered environment
+            try:
+                return discovered_info.get_client_class()
+            except ImportError as e:
+                # If discovery finds it but can't load it, raise the error
+                raise ImportError(
+                    f"Found environment '{env_key}' but failed to load client class: {e}"
+                ) from e
+
+        # Fall back to manual registry (deprecated)
+        warnings.warn(
+            f"Environment '{env_key}' not found via auto-discovery, falling back to "
+            f"manual registry. The manual registry is deprecated and will be removed "
+            f"in a future version. Please ensure your environment has an openenv.yaml "
+            f"manifest or follows the standard directory structure.",
+            DeprecationWarning,
+            stacklevel=3,
+        )
+
+        try:
+            env_info = get_env_info(env_key)
+        except ValueError:
+            # Not in registry either - provide helpful error
+            from difflib import get_close_matches
+
+            # Get all available environments from both sources
+            discovered = discover_environments()
+            suggestions = get_close_matches(
+                env_key, list(discovered.keys()), n=3, cutoff=0.6
+            )
+            suggestion_str = ""
+            if suggestions:
+                suggestion_str = f" Did you mean: {', '.join(suggestions)}?"
+
+            raise ValueError(
+                f"Unknown environment '{env_key}'. "
+                f"Available environments: {', '.join(sorted(discovered.keys()))}.{suggestion_str}"
+            )
 
         module_path = env_info["module"]
         class_name = env_info["env_class"]
@@ -270,19 +317,23 @@ class AutoEnv:
         # Get environment class
         env_class = cls._get_env_class(env_key)
 
-        # Get environment info for special requirements
-        env_info = get_env_info(env_key)
+        # Try to get environment info from discovery first for special requirements
+        discovered_info = get_environment_info(env_key)
 
-        # Warn about special requirements if not provided
-        special_req = env_info.get("special_requirements")
-        if special_req and "env_vars" not in kwargs:
-            import warnings
-
-            warnings.warn(
-                f"Environment '{env_key}' has special requirements: {special_req}. "
-                f"You may need to provide appropriate env_vars.",
-                UserWarning,
-            )
+        # If not in discovery, try registry (will be deprecated)
+        if discovered_info is None:
+            try:
+                env_info = get_env_info(env_key)
+                special_req = env_info.get("special_requirements")
+                if special_req and "env_vars" not in kwargs:
+                    warnings.warn(
+                        f"Environment '{env_key}' has special requirements: {special_req}. "
+                        f"You may need to provide appropriate env_vars.",
+                        UserWarning,
+                    )
+            except ValueError:
+                # Not in registry either, no special requirements to warn about
+                pass
 
         # Create and return instance using the class's from_docker_image method
         return env_class.from_docker_image(
@@ -335,6 +386,7 @@ class AutoEnv:
         Print a list of all available environments with descriptions.
 
         This is a convenience method for discovering what environments are available.
+        Uses auto-discovery to find all environments in the envs directory.
 
         Example:
             >>> AutoEnv.list_environments()
@@ -345,7 +397,20 @@ class AutoEnv:
             chat         : Chat environment with tokenization support
             ...
         """
-        envs = list_available_environments()
+        # Use discovery to get all environments
+        discovered = discover_environments()
+
+        # Get descriptions from discovered environments
+        envs = {key: info.description for key, info in discovered.items()}
+
+        # Fall back to registry if discovery is empty (shouldn't happen normally)
+        if not envs:
+            warnings.warn(
+                "No environments found via auto-discovery, falling back to manual registry. "
+                "This is deprecated.",
+                DeprecationWarning,
+            )
+            envs = list_available_environments()
 
         print("Available Environments:")
         print("-" * 60)
@@ -395,21 +460,50 @@ class AutoEnv:
         """
         Get detailed information about a specific environment.
 
+        Uses auto-discovery first, then falls back to manual registry.
+
         Args:
             env_key: Environment key (e.g., "coding", "atari")
 
         Returns:
             Dictionary with environment information including:
             - description
-            - special_requirements
-            - supported_features
+            - special_requirements (if available)
+            - supported_features (if available)
             - default_image
+            - version (from discovery)
+            - name
 
         Example:
             >>> info = AutoEnv.get_env_info("coding")
             >>> print(info["description"])
-            >>> print(info["special_requirements"])
-            >>> for feature in info["supported_features"]:
+            >>> print(info.get("special_requirements"))
+            >>> for feature in info.get("supported_features", []):
             ...     print(f"  - {feature}")
         """
+        # Try discovery first
+        discovered_info = get_environment_info(env_key)
+
+        if discovered_info is not None:
+            # Convert discovered info to dict format
+            return {
+                "name": discovered_info.name,
+                "description": discovered_info.description,
+                "version": discovered_info.version,
+                "default_image": f"{discovered_info.env_key}-env:latest",
+                "env_class": discovered_info.client_class_name,
+                "action_class": discovered_info.action_class_name,
+                "module": discovered_info.client_module_path,
+                # These fields are not available in discovery yet
+                "special_requirements": None,
+                "supported_features": [],
+            }
+
+        # Fall back to registry (deprecated)
+        warnings.warn(
+            f"Environment '{env_key}' info retrieved from manual registry. "
+            f"The manual registry is deprecated.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         return get_env_info(env_key)

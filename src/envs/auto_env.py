@@ -35,8 +35,10 @@ from __future__ import annotations
 
 import importlib
 import re
+import warnings
 from typing import Any, Optional, TYPE_CHECKING
 
+from ._discovery import get_discovery
 from ._registry import get_env_info, list_available_environments
 
 if TYPE_CHECKING:
@@ -165,19 +167,47 @@ class AutoEnv:
         """
         Dynamically import and return the environment class.
 
+        Tries auto-discovery first, falls back to manual registry.
+
         Args:
-            env_key: Environment key from registry
+            env_key: Environment key (e.g., "coding", "echo")
 
         Returns:
             Environment class type
 
         Raises:
             ImportError: If module or class cannot be imported
+            ValueError: If environment not found
         """
-        env_info = get_env_info(env_key)
+        # Try discovery first
+        discovery = get_discovery()
+        env_info = discovery.get_environment(env_key)
 
-        module_path = env_info["module"]
-        class_name = env_info["env_class"]
+        if env_info is not None:
+            # Use discovered environment
+            try:
+                return env_info.get_client_class()
+            except ImportError as e:
+                # If import fails, try registry as fallback
+                warnings.warn(
+                    f"Failed to import discovered environment '{env_key}': {e}. "
+                    f"Trying manual registry as fallback.",
+                    UserWarning
+                )
+        else:
+            # Not found via discovery, try registry
+            warnings.warn(
+                f"Environment '{env_key}' not found via auto-discovery, falling back to "
+                f"manual registry. The manual registry is deprecated and will be removed "
+                f"in a future version. Please ensure your environment has an openenv.yaml "
+                f"manifest or follows the standard directory structure.",
+                DeprecationWarning
+            )
+
+        # Fall back to registry
+        registry_info = get_env_info(env_key)
+        module_path = registry_info["module"]
+        class_name = registry_info["env_class"]
 
         try:
             # Dynamically import the module
@@ -334,30 +364,52 @@ class AutoEnv:
         """
         Print a list of all available environments with descriptions.
 
-        This is a convenience method for discovering what environments are available.
+        Uses auto-discovery to find all environments.
 
         Example:
             >>> AutoEnv.list_environments()
             Available Environments:
-            ----------------------
-            atari        : Atari 2600 games environment (100+ games)
-            browsergym   : Web browsing environment with multiple benchmarks
-            chat         : Chat environment with tokenization support
+            ----------------------------------------------------------------------
+            atari          : Atari Env environment (v0.1.0)
+            browsergym     : Browsergym Env environment (v0.1.0)
+            coding         : Coding Env environment (v0.1.0)
             ...
         """
-        envs = list_available_environments()
+        # Use discovery
+        discovery = get_discovery()
+        discovered_envs = discovery.discover()
 
-        print("Available Environments:")
-        print("-" * 60)
+        if discovered_envs:
+            print("Available Environments (via auto-discovery):")
+            print("-" * 70)
 
-        for env_key in sorted(envs.keys()):
-            description = envs[env_key]
-            print(f"  {env_key:<15}: {description}")
+            for env_key in sorted(discovered_envs.keys()):
+                env = discovered_envs[env_key]
+                print(f"  {env_key:<15}: {env.description} (v{env.version})")
 
-        print("-" * 60)
-        print(f"Total: {len(envs)} environments")
-        print("\nUsage:")
-        print("  env = AutoEnv.from_docker_image('{env-name}-env:latest')")
+            print("-" * 70)
+            print(f"Total: {len(discovered_envs)} environments")
+            print("\nUsage:")
+            print("  env = AutoEnv.from_docker_image('{env-name}-env:latest')")
+        else:
+            # Fallback to registry
+            warnings.warn(
+                "No environments found via auto-discovery, falling back to manual registry.",
+                UserWarning
+            )
+            envs = list_available_environments()
+
+            print("Available Environments (from manual registry):")
+            print("-" * 70)
+
+            for env_key in sorted(envs.keys()):
+                description = envs[env_key]
+                print(f"  {env_key:<15}: {description}")
+
+            print("-" * 70)
+            print(f"Total: {len(envs)} environments")
+            print("\nUsage:")
+            print("  env = AutoEnv.from_docker_image('{env-name}-env:latest')")
 
     @classmethod
     def from_name(cls, env_name: str) -> type:
@@ -395,21 +447,48 @@ class AutoEnv:
         """
         Get detailed information about a specific environment.
 
+        Uses auto-discovery first, falls back to manual registry.
+
         Args:
             env_key: Environment key (e.g., "coding", "atari")
 
         Returns:
             Dictionary with environment information including:
+            - name
             - description
-            - special_requirements
-            - supported_features
+            - version
             - default_image
+            - env_class
+            - action_class
+            - (from registry: special_requirements, supported_features)
 
         Example:
             >>> info = AutoEnv.get_env_info("coding")
             >>> print(info["description"])
-            >>> print(info["special_requirements"])
-            >>> for feature in info["supported_features"]:
-            ...     print(f"  - {feature}")
+            >>> print(info["version"])
+            >>> print(info["default_image"])
         """
-        return get_env_info(env_key)
+        # Try discovery first
+        discovery = get_discovery()
+        env_info = discovery.get_environment(env_key)
+
+        if env_info is not None:
+            # Return info from discovery
+            return {
+                "name": env_info.name,
+                "description": env_info.description,
+                "version": env_info.version,
+                "default_image": env_info.default_image,
+                "env_class": env_info.client_class_name,
+                "action_class": env_info.action_class_name,
+                "observation_class": env_info.observation_class_name,
+                "module": env_info.client_module_path,
+                "spec_version": env_info.spec_version,
+            }
+        else:
+            # Fallback to registry
+            warnings.warn(
+                f"Environment '{env_key}' not found via auto-discovery, falling back to manual registry.",
+                UserWarning
+            )
+            return get_env_info(env_key)

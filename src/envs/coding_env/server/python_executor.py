@@ -24,11 +24,10 @@ from __future__ import annotations
 import json
 import logging
 import traceback
-from typing import Any
 
 from smolagents import LocalPythonExecutor
 
-from core.env_server.types import CodeExecResult
+from openenv_core.env_server.types import CodeExecResult
 
 logger = logging.getLogger(__name__)
 logger.addHandler(logging.NullHandler())
@@ -47,9 +46,7 @@ class PyExecutor:
         if additional_imports is None:
             additional_imports = []
 
-        self._executor = LocalPythonExecutor(
-            additional_authorized_imports=additional_imports
-        )
+        self._executor = LocalPythonExecutor(additional_authorized_imports=additional_imports)
 
         # Register helpful utilities exposed to the execution environment.
         # These are intentionally small, read-only helpers.

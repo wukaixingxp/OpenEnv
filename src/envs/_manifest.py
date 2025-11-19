@@ -82,9 +82,14 @@ def _infer_class_name_from_env_name(env_name: str, class_type: str) -> str:
     - Convert to PascalCase: "browser_gym" → "BrowserGym"
     - Add class type suffix: "BrowserGym" + "Env" → "BrowserGymEnv"
 
-    Special cases:
-    - "coding" → "CodeAction" (not "CodingAction")
-    - "sumo_rl" → "SumoAction" (not "SumoRlAction")
+    Special cases handled:
+    - "browsergym" → "BrowserGymEnv", "BrowserGymAction" (capital G and Y)
+    - "coding" → "CodingEnv", "CodeAction" (not CodingAction)
+    - "dipg_safety" → "DIPGSafetyEnv", "DIPGAction" (all caps DIPG)
+    - "finrl" → "FinRLEnv", "FinRLAction" (capital RL)
+    - "openspiel" → "OpenSpielEnv", "OpenSpielAction" (capital S)
+    - "sumo_rl" → "SumoRLEnv", "SumoAction" (capital RL for Env, just Sumo for Action)
+    - "textarena" → "TextArenaEnv", "TextArenaAction" (capital A)
 
     Args:
         env_name: Environment directory name (e.g., "echo_env", "coding_env")
@@ -101,36 +106,52 @@ def _infer_class_name_from_env_name(env_name: str, class_type: str) -> str:
         >>> _infer_class_name_from_env_name("coding_env", "action")
         'CodeAction'
         >>> _infer_class_name_from_env_name("browsergym_env", "client")
-        'BrowsergymEnv'
+        'BrowserGymEnv'
         >>> _infer_class_name_from_env_name("sumo_rl_env", "client")
-        'SumoRlEnv'
+        'SumoRLEnv'
+        >>> _infer_class_name_from_env_name("dipg_safety_env", "client")
+        'DIPGSafetyEnv'
     """
     # Remove "_env" suffix if present
     base_name = env_name[:-4] if env_name.endswith("_env") else env_name
 
-    # Convert to PascalCase
-    # Split by underscore and capitalize each part
-    parts = base_name.split("_")
-    pascal_name = "".join(word.capitalize() for word in parts)
+    # Special case mapping for environments with non-standard capitalization
+    # Format: base_name -> (EnvName, ActionName, ObservationName)
+    special_cases = {
+        "browsergym": ("BrowserGym", "BrowserGym", "BrowserGym"),
+        "coding": ("Coding", "Code", "Code"),
+        "dipg_safety": ("DIPGSafety", "DIPG", "DIPG"),
+        "finrl": ("FinRL", "FinRL", "FinRL"),
+        "openspiel": ("OpenSpiel", "OpenSpiel", "OpenSpiel"),
+        "sumo_rl": ("SumoRL", "Sumo", "Sumo"),
+        "textarena": ("TextArena", "TextArena", "TextArena"),
+    }
 
-    # Apply class type suffix
-    if class_type == "client":
-        return f"{pascal_name}Env"
-    elif class_type == "action":
-        # Special case for "coding" → "CodeAction"
-        if base_name == "coding":
-            return "CodeAction"
-        # Special case for "sumo_rl" → "SumoAction"
-        if base_name == "sumo_rl":
-            return "SumoAction"
-        return f"{pascal_name}Action"
-    elif class_type == "observation":
-        # Special case for "coding" → "CodeObservation"
-        if base_name == "coding":
-            return "CodeObservation"
-        return f"{pascal_name}Observation"
+    if base_name in special_cases:
+        env_base, action_base, obs_base = special_cases[base_name]
+        if class_type == "client":
+            return f"{env_base}Env"
+        elif class_type == "action":
+            return f"{action_base}Action"
+        elif class_type == "observation":
+            return f"{obs_base}Observation"
+        else:
+            raise ValueError(f"Unknown class_type: {class_type}")
     else:
-        raise ValueError(f"Unknown class_type: {class_type}")
+        # Standard PascalCase conversion
+        # Split by underscore and capitalize each part
+        parts = base_name.split("_")
+        pascal_name = "".join(word.capitalize() for word in parts)
+
+        # Apply class type suffix
+        if class_type == "client":
+            return f"{pascal_name}Env"
+        elif class_type == "action":
+            return f"{pascal_name}Action"
+        elif class_type == "observation":
+            return f"{pascal_name}Observation"
+        else:
+            raise ValueError(f"Unknown class_type: {class_type}")
 
 
 def parse_manifest(manifest_path: Path) -> EnvironmentManifest:

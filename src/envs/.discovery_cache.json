@@ -40,9 +40,9 @@
     "client_module_path": "envs.finrl_env.client",
     "action_module_path": "envs.finrl_env.client",
     "observation_module_path": "envs.finrl_env.models",
-    "client_class_name": "FinrlEnv",
-    "action_class_name": "FinrlAction",
-    "observation_class_name": "FinrlObservation",
+    "client_class_name": "FinRLEnv",
+    "action_class_name": "FinRLAction",
+    "observation_class_name": "FinRLObservation",
     "default_image": "finrl-env:latest",
     "spec_version": null,
     "manifest": null
@@ -56,9 +56,9 @@
     "client_module_path": "envs.textarena_env.client",
     "action_module_path": "envs.textarena_env.client",
     "observation_module_path": "envs.textarena_env.models",
-    "client_class_name": "TextarenaEnv",
-    "action_class_name": "TextarenaAction",
-    "observation_class_name": "TextarenaObservation",
+    "client_class_name": "TextArenaEnv",
+    "action_class_name": "TextArenaAction",
+    "observation_class_name": "TextArenaObservation",
     "default_image": "textarena-env:latest",
     "spec_version": null,
     "manifest": null
@@ -95,9 +95,9 @@
     "client_module_path": "envs.browsergym_env.client",
     "action_module_path": "envs.browsergym_env.client",
     "observation_module_path": "envs.browsergym_env.models",
-    "client_class_name": "BrowsergymEnv",
-    "action_class_name": "BrowsergymAction",
-    "observation_class_name": "BrowsergymObservation",
+    "client_class_name": "BrowserGymEnv",
+    "action_class_name": "BrowserGymAction",
+    "observation_class_name": "BrowserGymObservation",
     "default_image": "browsergym-env:latest",
     "spec_version": null,
     "manifest": null
@@ -111,9 +111,9 @@
     "client_module_path": "envs.dipg_safety_env.client",
     "action_module_path": "envs.dipg_safety_env.client",
     "observation_module_path": "envs.dipg_safety_env.models",
-    "client_class_name": "DipgSafetyEnv",
-    "action_class_name": "DipgSafetyAction",
-    "observation_class_name": "DipgSafetyObservation",
+    "client_class_name": "DIPGSafetyEnv",
+    "action_class_name": "DIPGAction",
+    "observation_class_name": "DIPGObservation",
     "default_image": "dipg-safety-env:latest",
     "spec_version": null,
     "manifest": null
@@ -127,9 +127,9 @@
     "client_module_path": "envs.sumo_rl_env.client",
     "action_module_path": "envs.sumo_rl_env.client",
     "observation_module_path": "envs.sumo_rl_env.models",
-    "client_class_name": "SumoRlEnv",
+    "client_class_name": "SumoRLEnv",
     "action_class_name": "SumoAction",
-    "observation_class_name": "SumoRlObservation",
+    "observation_class_name": "SumoObservation",
     "default_image": "sumo-rl-env:latest",
     "spec_version": null,
     "manifest": null
@@ -175,9 +175,9 @@
     "client_module_path": "envs.openspiel_env.client",
     "action_module_path": "envs.openspiel_env.client",
     "observation_module_path": "envs.openspiel_env.models",
-    "client_class_name": "OpenspielEnv",
-    "action_class_name": "OpenspielAction",
-    "observation_class_name": "OpenspielObservation",
+    "client_class_name": "OpenSpielEnv",
+    "action_class_name": "OpenSpielAction",
+    "observation_class_name": "OpenSpielObservation",
     "default_image": "openspiel-env:latest",
     "spec_version": null,
     "manifest": null
@@ -192,16 +192,16 @@
     "action_module_path": "envs.coding_env.client",
     "observation_module_path": "envs.coding_env.models",
     "client_class_name": "CodingEnv",
-    "action_class_name": "CodingAction",
-    "observation_class_name": "CodingObservation",
+    "action_class_name": "CodeAction",
+    "observation_class_name": "CodeObservation",
     "default_image": "coding-env:latest",
     "spec_version": null,
     "manifest": {
       "name": "coding_env",
       "version": "0.1.0",
       "description": "Coding environment for OpenEnv",
-      "action": "CodingAction",
-      "observation": "CodingObservation"
+      "action": "CodeAction",
+      "observation": "CodeObservation"
     }
   }
 }

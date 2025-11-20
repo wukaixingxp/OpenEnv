@@ -50,9 +50,9 @@ class TestAutoEnvIntegration:
 class TestAutoActionIntegration:
     """Test AutoAction integration with discovery system."""
 
-    def test_auto_action_from_env(self):
-        """Test getting action class from environment name."""
-        EchoAction = AutoAction.from_env("echo")
+    def test_auto_action_from_name_simple(self):
+        """Test getting action class from simple name."""
+        EchoAction = AutoAction.from_name("echo")
         assert EchoAction.__name__ == "EchoAction"
 
     def test_auto_action_from_name(self):
@@ -91,7 +91,7 @@ class TestAutoEnvAutoActionTogether:
         assert EchoEnv.__name__ == "EchoEnv"
 
         # Get action class
-        EchoAction = AutoAction.from_env("echo")
+        EchoAction = AutoAction.from_name("echo")
         assert EchoAction.__name__ == "EchoAction"
 
         # Verify they're related
@@ -108,7 +108,7 @@ class TestAutoEnvAutoActionTogether:
             assert env_class is not None
 
             # Get action class
-            action_class = AutoAction.from_env(env_key)
+            action_class = AutoAction.from_name(env_key)
             assert action_class is not None
 
             # Verify they match

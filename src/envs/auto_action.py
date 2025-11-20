@@ -55,7 +55,7 @@ class AutoAction:
 
     Example:
         >>> # Get Action class from environment name
-        >>> CodeAction = AutoAction.from_env("coding")
+        >>> CodeAction = AutoAction.from_name("coding")
         >>> action = CodeAction(code="print('test')")
         >>>
         >>> # Get Action class from environment image name
@@ -70,14 +70,14 @@ class AutoAction:
 
     Note:
         AutoAction is not meant to be instantiated directly. Use the class
-        methods like from_env() or from_name() instead.
+        method from_name() instead.
     """
 
     def __init__(self):
         """AutoAction should not be instantiated directly. Use class methods instead."""
         raise TypeError(
             "AutoAction is a factory class and should not be instantiated directly. "
-            "Use AutoAction.from_env() or AutoAction.from_name() instead."
+            "Use AutoAction.from_name() instead."
         )
 
     @classmethod
@@ -196,40 +196,6 @@ class AutoAction:
                 f"Failed to import {env_info.action_class_name} from {env_info.action_module_path}: {e}. "
                 f"Make sure the environment package is installed."
             ) from e
-
-    @classmethod
-    def from_env(cls, env_name: str) -> Type:
-        """
-        Get the Action class for a specific environment by name.
-
-        This method takes an environment name (key in the registry) and returns
-        the corresponding Action class.
-
-        Args:
-            env_name: Environment name (e.g., "coding", "atari", "echo")
-
-        Returns:
-            The Action class for the specified environment (not an instance)
-
-        Raises:
-            ValueError: If environment name is not found in registry
-            ImportError: If Action class module cannot be imported
-
-        Examples:
-            >>> # Get CodeAction class
-            >>> CodeAction = AutoAction.from_env("coding")
-            >>> action = CodeAction(code="print('Hello!')")
-            >>>
-            >>> # Get AtariAction class
-            >>> AtariAction = AutoAction.from_env("atari")
-            >>> action = AtariAction(action=0)  # Fire button
-            >>>
-            >>> # Get EchoAction class
-            >>> EchoAction = AutoAction.from_env("echo")
-            >>> action = EchoAction(message="Hello!")
-        """
-        env_key = env_name.lower()
-        return cls._get_action_class(env_key)
 
     @classmethod
     def from_name(cls, name: str) -> Type:
@@ -357,9 +323,7 @@ class AutoAction:
             print("-" * 70)
             print(f"Total: {len(discovered_envs)} Action classes")
             print("\nUsage:")
-            print("  ActionClass = AutoAction.from_env('env-name')")
-            print("  # or")
-            print("  ActionClass = AutoAction.from_name('env-name-env')")
+            print("  ActionClass = AutoAction.from_name('coding-env')  # or just 'coding'")
         else:
             print("No action classes found.")
             print("Make sure your environments are in the src/envs/ directory.")

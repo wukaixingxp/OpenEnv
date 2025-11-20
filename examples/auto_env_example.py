@@ -67,15 +67,15 @@ def example_basic_usage():
 
 
 def example_alternative_syntax():
-    """Example 2: Alternative syntax using from_env()"""
+    """Example 2: Alternative syntax using environment key"""
     print("=" * 70)
     print("Example 2: Alternative Syntax")
     print("=" * 70)
     print()
 
-    # You can also use environment names directly
+    # You can also use just the environment key
     print("Getting Action class by environment name...")
-    CodeAction = AutoAction.from_env("coding")
+    CodeAction = AutoAction.from_name("coding")
     print(f"✓ Got Action class: {CodeAction.__name__}")
     print()
 
@@ -218,7 +218,7 @@ def test_specific_environment(env_name: str):
         print("✓ Environment created!")
 
         # Get action class
-        ActionClass = AutoAction.from_env(env_name)
+        ActionClass = AutoAction.from_name(env_name)
         print(f"✓ Action class: {ActionClass.__name__}")
         print()
 

@@ -38,6 +38,11 @@ class HTTPEnvClient(ABC, Generic[ActT, ObsT]):
         self._base = base_url.rstrip("/")
         self._timeout = float(request_timeout_s)
         self._http = requests.Session()
+
+        # Disable environment proxy settings for localhost connections to avoid SSL/TLS errors
+        if "localhost" in base_url or "127.0.0.1" in base_url:
+            self._http.trust_env = False
+
         self._headers = default_headers or {}
         self._provider = provider
 

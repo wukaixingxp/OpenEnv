@@ -287,15 +287,23 @@ class LocalDockerProvider(ContainerProvider):
         start_time = time.time()
         health_url = f"{base_url}/health"
 
+        # Create session with proxy bypass for localhost
+        session = requests.Session()
+        if "localhost" in base_url or "127.0.0.1" in base_url:
+            session.trust_env = False  # Ignore environment proxy settings
+
         while time.time() - start_time < timeout_s:
             try:
-                response = requests.get(health_url, timeout=2.0)
+                response = session.get(health_url, timeout=2.0)
                 if response.status_code == 200:
+                    session.close()
                     return
             except requests.RequestException:
                 pass
 
             time.sleep(0.5)
+
+        session.close()
 
         # Get container logs for debugging
         logs_snippet = ""

@@ -126,12 +126,10 @@ def example_environment_info():
     print(f"  Docker Image: {info['default_image']}")
     print(f"  Environment Class: {info['env_class']}")
     print(f"  Action Class: {info['action_class']}")
-    print(f"  Special Requirements: {info['special_requirements'] or 'None'}")
-    print()
-
-    print("  Supported Features:")
-    for feature in info["supported_features"]:
-        print(f"    - {feature}")
+    print(f"  Observation Class: {info['observation_class']}")
+    print(f"  Module: {info['module']}")
+    print(f"  Version: {info['version']}")
+    print(f"  Spec Version: {info['spec_version']}")
     print()
 
 

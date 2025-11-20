@@ -42,13 +42,13 @@ def example_basic_usage():
 
     # You can now do:
     print("Creating environment using AutoEnv...")
-    client = AutoEnv.from_docker_image("coding-env:latest")
+    client = AutoEnv.from_name("coding-env")
     print("✓ Environment created!")
     print()
 
     # Get the Action class automatically
     print("Getting Action class using AutoAction...")
-    CodeAction = AutoAction.from_image("coding-env:latest")
+    CodeAction = AutoAction.from_name("coding-env")
     print(f"✓ Got Action class: {CodeAction.__name__}")
     print()
 
@@ -143,7 +143,7 @@ def example_error_handling():
     # Try an unknown environment
     print("Trying unknown environment 'nonexistent'...")
     try:
-        env = AutoEnv.from_docker_image("nonexistent-env:latest")
+        env = AutoEnv.from_name("nonexistent-env")
     except ValueError as e:
         print(f"✓ Got expected error: {e}")
     print()
@@ -151,7 +151,7 @@ def example_error_handling():
     # Try a typo - should suggest similar names
     print("Trying typo 'cooding' (should suggest 'coding')...")
     try:
-        env = AutoEnv.from_docker_image("cooding-env:latest")
+        env = AutoEnv.from_name("cooding-env")
     except ValueError as e:
         print(f"✓ Got helpful suggestion: {e}")
     print()
@@ -159,7 +159,7 @@ def example_error_handling():
     # Try deprecated julia environment
     print("Trying deprecated 'julia' environment...")
     try:
-        env = AutoEnv.from_docker_image("julia-env:latest")
+        env = AutoEnv.from_name("julia-env")
     except ValueError as e:
         print(f"✓ Got deprecation notice: {e}")
     print()
@@ -176,11 +176,11 @@ def example_special_requirements():
     print("DIPG environment requires DIPG_DATASET_PATH:")
     print()
     print("  # This would show a warning:")
-    print("  # env = AutoEnv.from_docker_image('dipg-env:latest')")
+    print("  # env = AutoEnv.from_name('dipg-env')")
     print()
     print("  # Correct usage:")
-    print("  env = AutoEnv.from_docker_image(")
-    print("      'dipg-env:latest',")
+    print("  env = AutoEnv.from_name(")
+    print("      'dipg-env',")
     print("      env_vars={'DIPG_DATASET_PATH': '/data/dipg'}")
     print("  )")
     print()
@@ -188,8 +188,8 @@ def example_special_requirements():
     # FinRL environment has optional config
     print("FinRL environment accepts optional config:")
     print()
-    print("  env = AutoEnv.from_docker_image(")
-    print("      'finrl-env:latest',")
+    print("  env = AutoEnv.from_name(")
+    print("      'finrl-env',")
     print("      env_vars={'FINRL_CONFIG_PATH': '/config.json'}")
     print("  )")
     print()
@@ -212,7 +212,9 @@ def test_specific_environment(env_name: str):
         print()
 
         # Create environment with extended timeout for slow containers
-        env = AutoEnv.from_docker_image(image, wait_timeout=60.0)
+        # Use the simplified name format
+        env_image_name = f"{env_name}-env" if not env_name.endswith("-env") else env_name
+        env = AutoEnv.from_name(env_image_name, wait_timeout=60.0)
         print("✓ Environment created!")
 
         # Get action class

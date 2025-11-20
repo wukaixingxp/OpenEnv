@@ -9,7 +9,7 @@ AutoAction - Automatic Action Class Selection
 ==============================================
 
 AutoAction provides a HuggingFace-style API for automatically retrieving the
-correct Action class based on environment names or Docker image names.
+correct Action class based on environment names.
 
 This module simplifies working with environment actions by automatically
 detecting and returning the appropriate Action class without requiring
@@ -21,14 +21,14 @@ Example:
     >>> # Get Action class from environment name
     >>> CodeAction = AutoAction.from_env("coding")
     >>>
-    >>> # Or get Action class from Docker image
-    >>> CodeAction = AutoAction.from_image("coding-env:latest")
+    >>> # Or get Action class from environment image name
+    >>> CodeAction = AutoAction.from_name("coding-env")
     >>>
     >>> # Use the Action class
     >>> action = CodeAction(code="print('Hello!')")
     >>>
     >>> # Use with AutoEnv
-    >>> env = AutoEnv.from_docker_image("coding-env:latest")
+    >>> env = AutoEnv.from_name("coding-env")
     >>> result = env.step(action)
 """
 
@@ -45,7 +45,7 @@ from ._discovery import get_discovery
 class AutoAction:
     """
     AutoAction automatically retrieves the correct Action class based on
-    environment names or Docker image names.
+    environment names.
 
     This class follows the HuggingFace AutoModel pattern, making it easy to
     get the right Action class without needing to know which module to import.
@@ -58,26 +58,26 @@ class AutoAction:
         >>> CodeAction = AutoAction.from_env("coding")
         >>> action = CodeAction(code="print('test')")
         >>>
-        >>> # Get Action class from Docker image name
-        >>> CodeAction = AutoAction.from_image("coding-env:latest")
+        >>> # Get Action class from environment image name
+        >>> CodeAction = AutoAction.from_name("coding-env")
         >>> action = CodeAction(code="print('test')")
         >>>
         >>> # Use with AutoEnv for a complete workflow
-        >>> env = AutoEnv.from_docker_image("coding-env:latest")
-        >>> ActionClass = AutoAction.from_image("coding-env:latest")
+        >>> env = AutoEnv.from_name("coding-env")
+        >>> ActionClass = AutoAction.from_name("coding-env")
         >>> action = ActionClass(code="print('Hello, AutoAction!')")
         >>> result = env.step(action)
 
     Note:
         AutoAction is not meant to be instantiated directly. Use the class
-        methods like from_env() or from_image() instead.
+        methods like from_env() or from_name() instead.
     """
 
     def __init__(self):
         """AutoAction should not be instantiated directly. Use class methods instead."""
         raise TypeError(
             "AutoAction is a factory class and should not be instantiated directly. "
-            "Use AutoAction.from_env() or AutoAction.from_image() instead."
+            "Use AutoAction.from_env() or AutoAction.from_name() instead."
         )
 
     @classmethod
@@ -232,36 +232,57 @@ class AutoAction:
         return cls._get_action_class(env_key)
 
     @classmethod
-    def from_image(cls, image: str) -> Type:
+    def from_name(cls, name: str) -> Type:
         """
-        Get the Action class for an environment by parsing its Docker image name.
+        Get the Action class for an environment by parsing its name.
 
-        This method takes a Docker image name, extracts the environment type,
-        and returns the corresponding Action class.
+        This method takes an environment name (with or without suffix and tag),
+        extracts the environment type, and returns the corresponding Action class.
 
         Args:
-            image: Docker image name (e.g., "coding-env:latest")
+            name: Environment name (e.g., "coding-env", "coding-env:latest", or "coding")
+                  If no tag is provided, it is automatically handled
 
         Returns:
             The Action class for the environment (not an instance)
 
         Raises:
-            ValueError: If image name cannot be parsed or environment not found
+            ValueError: If name cannot be parsed or environment not found
             ImportError: If Action class module cannot be imported
 
         Examples:
-            >>> # Get CodeAction from image name
-            >>> CodeAction = AutoAction.from_image("coding-env:latest")
+            >>> # Get CodeAction from environment name
+            >>> CodeAction = AutoAction.from_name("coding-env")
             >>> action = CodeAction(code="print('Hello!')")
             >>>
-            >>> # With full registry path
-            >>> CodeAction = AutoAction.from_image("ghcr.io/openenv/coding-env:v1.0")
+            >>> # With tag
+            >>> CodeAction = AutoAction.from_name("coding-env:v1.0")
             >>> action = CodeAction(code="x = 5 + 3")
             >>>
+            >>> # With full registry path
+            >>> CodeAction = AutoAction.from_name("ghcr.io/openenv/coding-env:v1.0")
+            >>> action = CodeAction(code="import math")
+            >>>
             >>> # From Hugging Face Hub format
-            >>> CodeAction = AutoAction.from_image("registry.hf.space/openenv-coding-env:latest")
+            >>> CodeAction = AutoAction.from_name("registry.hf.space/openenv-coding-env:latest")
             >>> action = CodeAction(code="import math")
         """
+        # Normalize name to image format
+        image = name
+        if ":" not in name:
+            # No tag provided, add :latest
+            if not name.endswith("-env"):
+                # Name is like "coding", convert to "coding-env:latest"
+                image = f"{name}-env:latest"
+            else:
+                # Name is like "coding-env", add :latest
+                image = f"{name}:latest"
+        elif not name.split(":")[0].endswith("-env"):
+            # Has tag but no -env suffix, add -env
+            # e.g., "coding:v1.0" -> "coding-env:v1.0"
+            base, tag = name.split(":", 1)
+            image = f"{base}-env:{tag}"
+
         env_key = cls._parse_env_name_from_image(image)
         return cls._get_action_class(env_key)
 
@@ -338,7 +359,7 @@ class AutoAction:
             print("\nUsage:")
             print("  ActionClass = AutoAction.from_env('env-name')")
             print("  # or")
-            print("  ActionClass = AutoAction.from_image('env-name-env:latest')")
+            print("  ActionClass = AutoAction.from_name('env-name-env')")
         else:
             print("No action classes found.")
             print("Make sure your environments are in the src/envs/ directory.")

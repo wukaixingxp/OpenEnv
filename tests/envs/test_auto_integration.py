@@ -18,14 +18,14 @@ from envs import AutoEnv, AutoAction
 class TestAutoEnvIntegration:
     """Test AutoEnv integration with discovery system."""
 
-    def test_auto_env_from_name(self):
+    def test_auto_env_get_env_class(self):
         """Test getting environment class by name."""
-        EchoEnv = AutoEnv.from_name("echo")
+        EchoEnv = AutoEnv.get_env_class("echo")
         assert EchoEnv.__name__ == "EchoEnv"
 
         # Note: coding_env currently has import issues (uses absolute imports)
         # Skip for now
-        # CodingEnv = AutoEnv.from_name("coding")
+        # CodingEnv = AutoEnv.get_env_class("coding")
         # assert CodingEnv.__name__ == "CodingEnv"
 
     def test_auto_env_get_env_info(self):
@@ -41,7 +41,7 @@ class TestAutoEnvIntegration:
         """Test listing all environments."""
         AutoEnv.list_environments()
         captured = capsys.readouterr()
-        assert "via auto-discovery" in captured.out
+        assert "Available Environments" in captured.out
         assert "echo" in captured.out
         assert "coding" in captured.out
         assert "Total: 12 environments" in captured.out
@@ -55,14 +55,14 @@ class TestAutoActionIntegration:
         EchoAction = AutoAction.from_env("echo")
         assert EchoAction.__name__ == "EchoAction"
 
-    def test_auto_action_from_image(self):
-        """Test getting action class from Docker image."""
-        EchoAction = AutoAction.from_image("echo-env:latest")
+    def test_auto_action_from_name(self):
+        """Test getting action class from environment name."""
+        EchoAction = AutoAction.from_name("echo-env")
         assert EchoAction.__name__ == "EchoAction"
 
         # Note: coding_env currently has import issues (uses absolute imports)
         # Skip for now
-        # CodingAction = AutoAction.from_image("coding-env:latest")
+        # CodingAction = AutoAction.from_name("coding-env")
         # assert CodingAction.__name__ in ["CodeAction", "CodingAction"]
 
     def test_auto_action_get_action_info(self):
@@ -76,7 +76,7 @@ class TestAutoActionIntegration:
         """Test listing all action classes."""
         AutoAction.list_actions()
         captured = capsys.readouterr()
-        assert "via auto-discovery" in captured.out
+        assert "Available Action Classes" in captured.out
         assert "EchoAction" in captured.out
         assert "Total: 12 Action classes" in captured.out
 
@@ -87,7 +87,7 @@ class TestAutoEnvAutoActionTogether:
     def test_auto_env_and_action_together(self):
         """Test getting both environment and action class."""
         # Get environment class
-        EchoEnv = AutoEnv.from_name("echo")
+        EchoEnv = AutoEnv.get_env_class("echo")
         assert EchoEnv.__name__ == "EchoEnv"
 
         # Get action class
@@ -104,7 +104,7 @@ class TestAutoEnvAutoActionTogether:
 
         for env_key in test_envs:
             # Get environment class
-            env_class = AutoEnv.from_name(env_key)
+            env_class = AutoEnv.get_env_class(env_key)
             assert env_class is not None
 
             # Get action class

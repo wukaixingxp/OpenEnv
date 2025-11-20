@@ -9,20 +9,20 @@ AutoEnv - Automatic Environment Selection
 ==========================================
 
 AutoEnv provides a HuggingFace-style API for automatically selecting and
-instantiating the correct environment client based on Docker image names.
+instantiating the correct environment client based on environment names.
 
 This module simplifies environment creation by automatically detecting the
-environment type from the Docker image name and instantiating the appropriate
+environment type from the name and instantiating the appropriate
 client class.
 
 Example:
     >>> from envs import AutoEnv, AutoAction
     >>>
     >>> # Automatically detect and create the right environment
-    >>> client = AutoEnv.from_docker_image("coding-env:latest")
+    >>> client = AutoEnv.from_name("coding-env")
     >>>
     >>> # Get the corresponding Action class
-    >>> CodeAction = AutoAction.from_image("coding-env:latest")
+    >>> CodeAction = AutoAction.from_name("coding-env")
     >>>
     >>> # Use them together
     >>> result = client.reset()
@@ -48,22 +48,22 @@ if TYPE_CHECKING:
 class AutoEnv:
     """
     AutoEnv automatically selects and instantiates the correct environment client
-    based on Docker image names.
+    based on environment names.
 
     This class follows the HuggingFace AutoModel pattern, making it easy to work
     with different environments without needing to import specific client classes.
 
-    The class provides factory methods that parse Docker image names, look up the
+    The class provides factory methods that parse environment names, look up the
     corresponding environment in the registry, and return an instance of the
     appropriate client class.
 
     Example:
-        >>> # Simple usage - just specify the image
-        >>> env = AutoEnv.from_docker_image("coding-env:latest")
+        >>> # Simple usage - just specify the name
+        >>> env = AutoEnv.from_name("coding-env")
         >>>
         >>> # With custom configuration
-        >>> env = AutoEnv.from_docker_image(
-        ...     "dipg-env:latest",
+        >>> env = AutoEnv.from_name(
+        ...     "dipg-env",
         ...     env_vars={"DIPG_DATASET_PATH": "/data/dipg"}
         ... )
         >>>
@@ -75,14 +75,14 @@ class AutoEnv:
 
     Note:
         AutoEnv is not meant to be instantiated directly. Use the class methods
-        like from_docker_image() or from_hub() instead.
+        like from_name() or from_hub() instead.
     """
 
     def __init__(self):
         """AutoEnv should not be instantiated directly. Use class methods instead."""
         raise TypeError(
             "AutoEnv is a factory class and should not be instantiated directly. "
-            "Use AutoEnv.from_docker_image() or AutoEnv.from_hub() instead."
+            "Use AutoEnv.from_name() or AutoEnv.from_hub() instead."
         )
 
     @classmethod
@@ -207,26 +207,27 @@ class AutoEnv:
             ) from e
 
     @classmethod
-    def from_docker_image(
+    def from_name(
         cls,
-        image: str,
+        name: str,
         provider: Optional["ContainerProvider"] = None,
         wait_timeout: float = 30.0,
         **kwargs: Any,
     ) -> "HTTPEnvClient":
         """
-        Create an environment client from a Docker image, automatically detecting
-        the environment type.
+        Create an environment client from an environment name, automatically detecting
+        the environment type and handling Docker image details.
 
         This method:
-        1. Parses the Docker image name to identify the environment type
+        1. Parses the environment name to identify the environment type
         2. Looks up the environment in the registry
         3. Dynamically imports the appropriate client class
-        4. Calls that class's from_docker_image() method
+        4. Calls that class's from_docker_image() method with the appropriate image
         5. Returns the instantiated client
 
         Args:
-            image: Docker image name (e.g., "coding-env:latest")
+            name: Environment name (e.g., "coding-env", "coding-env:latest", or "coding")
+                  If no tag is provided, ":latest" is automatically appended
             provider: Optional container provider (defaults to LocalDockerProvider)
             wait_timeout: Maximum time (in seconds) to wait for container to be ready (default: 30.0)
                          Increase this for slow-starting containers or low-resource environments
@@ -240,25 +241,28 @@ class AutoEnv:
             An instance of the appropriate environment client class
 
         Raises:
-            ValueError: If image name cannot be parsed or environment not found
+            ValueError: If name cannot be parsed or environment not found
             ImportError: If environment module cannot be imported
             TimeoutError: If container doesn't become ready within wait_timeout
 
         Examples:
-            >>> # Simple usage
-            >>> env = AutoEnv.from_docker_image("coding-env:latest")
+            >>> # Simple usage with environment name
+            >>> env = AutoEnv.from_name("coding-env")
             >>> result = env.reset()
             >>> env.close()
             >>>
+            >>> # With tag specified
+            >>> env = AutoEnv.from_name("coding-env:v1.0")
+            >>>
             >>> # With custom timeout (useful for slow containers)
-            >>> env = AutoEnv.from_docker_image(
-            ...     "coding-env:latest",
+            >>> env = AutoEnv.from_name(
+            ...     "coding-env",
             ...     wait_timeout=60.0  # Wait up to 60 seconds
             ... )
             >>>
             >>> # With environment variables (for DIPG environment)
-            >>> env = AutoEnv.from_docker_image(
-            ...     "dipg-env:latest",
+            >>> env = AutoEnv.from_name(
+            ...     "dipg-env",
             ...     wait_timeout=60.0,
             ...     env_vars={"DIPG_DATASET_PATH": "/data/dipg"}
             ... )
@@ -266,12 +270,30 @@ class AutoEnv:
             >>> # With custom provider
             >>> from core.containers.runtime import LocalDockerProvider
             >>> provider = LocalDockerProvider()
-            >>> env = AutoEnv.from_docker_image(
-            ...     "coding-env:latest",
+            >>> env = AutoEnv.from_name(
+            ...     "coding-env",
             ...     provider=provider,
             ...     wait_timeout=45.0
             ... )
         """
+        # Normalize name to image format
+        # If name doesn't have a tag and doesn't end with -env, add -env suffix
+        # If name has -env but no tag, add :latest
+        image = name
+        if ":" not in name:
+            # No tag provided, add :latest
+            if not name.endswith("-env"):
+                # Name is like "coding", convert to "coding-env:latest"
+                image = f"{name}-env:latest"
+            else:
+                # Name is like "coding-env", add :latest
+                image = f"{name}:latest"
+        elif not name.split(":")[0].endswith("-env"):
+            # Has tag but no -env suffix, add -env
+            # e.g., "coding:v1.0" -> "coding-env:v1.0"
+            base, tag = name.split(":", 1)
+            image = f"{base}-env:{tag}"
+
         # Parse environment name from image
         env_key = cls._parse_env_name_from_image(image)
 
@@ -294,7 +316,7 @@ class AutoEnv:
         Create an environment client from Hugging Face Hub.
 
         This is a convenience method that constructs the appropriate Docker image
-        name from a Hugging Face repository ID and calls from_docker_image().
+        name from a Hugging Face repository ID and calls from_name().
 
         Args:
             repo_id: Hugging Face repository ID (e.g., "openenv/coding-env")
@@ -320,8 +342,8 @@ class AutoEnv:
         # Construct image name for HF registry
         image = f"registry.hf.space/{repo_id.replace('/', '-')}:{tag}"
 
-        # Use from_docker_image with the constructed image name
-        return cls.from_docker_image(image=image, provider=provider, **kwargs)
+        # Use from_name with the constructed image name
+        return cls.from_name(name=image, provider=provider, **kwargs)
 
     @classmethod
     def list_environments(cls) -> None:
@@ -354,7 +376,7 @@ class AutoEnv:
             print("-" * 70)
             print(f"Total: {len(discovered_envs)} environments")
             print("\nUsage:")
-            print("  env = AutoEnv.from_docker_image('{env-name}-env:latest')")
+            print("  env = AutoEnv.from_name('coding-env')")
         else:
             print("No environments found.")
             print("Make sure your environments are in the src/envs/ directory.")
@@ -363,7 +385,7 @@ class AutoEnv:
             print("  - Or follow the standard directory structure with client.py")
 
     @classmethod
-    def from_name(cls, env_name: str) -> type:
+    def get_env_class(cls, env_name: str) -> type:
         """
         Get the environment class for a specific environment by name.
 
@@ -382,13 +404,13 @@ class AutoEnv:
 
         Examples:
             >>> # Get CodingEnv class
-            >>> CodingEnv = AutoEnv.from_name("coding")
+            >>> CodingEnv = AutoEnv.get_env_class("coding")
             >>>
             >>> # Get AtariEnv class
-            >>> AtariEnv = AutoEnv.from_name("atari")
+            >>> AtariEnv = AutoEnv.get_env_class("atari")
             >>>
             >>> # Get EchoEnv class
-            >>> EchoEnv = AutoEnv.from_name("echo")
+            >>> EchoEnv = AutoEnv.get_env_class("echo")
         """
         env_key = env_name.lower()
         return cls._get_env_class(env_key)

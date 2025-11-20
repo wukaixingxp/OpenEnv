@@ -19,16 +19,16 @@ Auto Classes
 ------------
 The AutoEnv and AutoAction classes provide a HuggingFace-style API for
 automatically selecting the correct environment and action types based on
-Docker image names.
+environment names.
 
 Example:
     >>> from envs import AutoEnv, AutoAction
     >>>
-    >>> # Automatically detect and create environment from image
-    >>> client = AutoEnv.from_docker_image("coding-env:latest")
+    >>> # Automatically detect and create environment from name
+    >>> client = AutoEnv.from_name("coding-env")
     >>>
     >>> # Get the corresponding Action class
-    >>> CodeAction = AutoAction.from_image("coding-env:latest")
+    >>> CodeAction = AutoAction.from_name("coding-env")
     >>>
     >>> # Use them together
     >>> result = client.reset()

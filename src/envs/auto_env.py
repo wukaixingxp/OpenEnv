@@ -67,22 +67,19 @@ class AutoEnv:
         ...     env_vars={"DIPG_DATASET_PATH": "/data/dipg"}
         ... )
         >>>
-        >>> # From Hugging Face Hub
-        >>> env = AutoEnv.from_hub("openenv/coding-env", tag="v1.0")
-        >>>
         >>> # List available environments
         >>> AutoEnv.list_environments()
 
     Note:
-        AutoEnv is not meant to be instantiated directly. Use the class methods
-        like from_name() or from_hub() instead.
+        AutoEnv is not meant to be instantiated directly. Use the class method
+        from_name() instead.
     """
 
     def __init__(self):
         """AutoEnv should not be instantiated directly. Use class methods instead."""
         raise TypeError(
             "AutoEnv is a factory class and should not be instantiated directly. "
-            "Use AutoEnv.from_name() or AutoEnv.from_hub() instead."
+            "Use AutoEnv.from_name() instead."
         )
 
     @classmethod
@@ -304,46 +301,6 @@ class AutoEnv:
         return env_class.from_docker_image(
             image=image, provider=provider, wait_timeout=wait_timeout, **kwargs
         )
-
-    @classmethod
-    def from_hub(
-        cls,
-        repo_id: str,
-        provider: Optional["ContainerProvider"] = None,
-        **kwargs: Any,
-    ) -> "HTTPEnvClient":
-        """
-        Create an environment client from Hugging Face Hub.
-
-        This is a convenience method that constructs the appropriate Docker image
-        name from a Hugging Face repository ID and calls from_name().
-
-        Args:
-            repo_id: Hugging Face repository ID (e.g., "openenv/coding-env")
-            provider: Optional container provider (defaults to LocalDockerProvider)
-            **kwargs: Additional arguments, including:
-                     - tag: Docker image tag (default: "latest")
-                     - env_vars: Dict of environment variables
-                     - Other provider kwargs
-
-        Returns:
-            An instance of the appropriate environment client class
-
-        Example:
-            >>> # Pull from Hugging Face Hub
-            >>> env = AutoEnv.from_hub("openenv/coding-env")
-            >>>
-            >>> # With specific version
-            >>> env = AutoEnv.from_hub("openenv/coding-env", tag="v1.0")
-        """
-        # Extract tag if provided
-        tag = kwargs.pop("tag", "latest")
-
-        # Construct image name for HF registry
-        image = f"registry.hf.space/{repo_id.replace('/', '-')}:{tag}"
-
-        # Use from_name with the constructed image name
-        return cls.from_name(name=image, provider=provider, **kwargs)
 
     @classmethod
     def list_environments(cls) -> None:

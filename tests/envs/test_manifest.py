@@ -52,8 +52,8 @@ class TestClassNameInference:
 
     def test_infer_with_underscores(self):
         """Test inferring class names with underscores (e.g., browser_gym)."""
-        assert _infer_class_name_from_env_name("browsergym_env", "client") == "BrowsergymEnv"
-        assert _infer_class_name_from_env_name("browsergym_env", "action") == "BrowsergymAction"
+        assert _infer_class_name_from_env_name("browsergym_env", "client") == "BrowserGymEnv"
+        assert _infer_class_name_from_env_name("browsergym_env", "action") == "BrowserGymAction"
 
     def test_infer_special_case_coding(self):
         """Test special case: coding → CodeAction (not CodingAction)."""
@@ -63,7 +63,7 @@ class TestClassNameInference:
 
     def test_infer_special_case_sumo_rl(self):
         """Test special case: sumo_rl → SumoAction (not SumoRlAction)."""
-        assert _infer_class_name_from_env_name("sumo_rl_env", "client") == "SumoRlEnv"
+        assert _infer_class_name_from_env_name("sumo_rl_env", "client") == "SumoRLEnv"
         assert _infer_class_name_from_env_name("sumo_rl_env", "action") == "SumoAction"
 
     def test_infer_atari(self):
@@ -78,8 +78,8 @@ class TestClassNameInference:
 
     def test_infer_dipg_safety(self):
         """Test DIPG safety environment (multi-word)."""
-        assert _infer_class_name_from_env_name("dipg_safety_env", "client") == "DipgSafetyEnv"
-        assert _infer_class_name_from_env_name("dipg_safety_env", "action") == "DipgSafetyAction"
+        assert _infer_class_name_from_env_name("dipg_safety_env", "client") == "DIPGSafetyEnv"
+        assert _infer_class_name_from_env_name("dipg_safety_env", "action") == "DIPGAction"
 
     def test_infer_invalid_class_type(self):
         """Test that invalid class type raises ValueError."""
@@ -254,8 +254,8 @@ class TestCreateManifestFromConvention:
         manifest = create_manifest_from_convention(env_dir)
 
         assert manifest.name == "browsergym_env"
-        assert manifest.client.class_name == "BrowsergymEnv"
-        assert manifest.action.class_name == "BrowsergymAction"
+        assert manifest.client.class_name == "BrowserGymEnv"
+        assert manifest.action.class_name == "BrowserGymAction"
 
     def test_create_from_coding_env(self, tmp_path):
         """Test creating manifest for coding_env (special case)."""

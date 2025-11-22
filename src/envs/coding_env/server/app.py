@@ -23,8 +23,8 @@ Usage:
 
 from openenv_core.env_server import create_app
 
-from ..models import CodeAction, CodeObservation
-from .python_codeact_env import PythonCodeActEnv
+from coding_env.models import CodeAction, CodeObservation
+from coding_env.server.python_codeact_env import PythonCodeActEnv
 
 # Create the environment instance
 env = PythonCodeActEnv()

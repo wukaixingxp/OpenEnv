@@ -118,11 +118,7 @@ class LocalDockerProvider(ContainerProvider):
                 capture_output=True,
                 timeout=5,
             )
-        except (
-            subprocess.CalledProcessError,
-            FileNotFoundError,
-            subprocess.TimeoutExpired,
-        ):
+        except (subprocess.CalledProcessError, FileNotFoundError, subprocess.TimeoutExpired):
             raise RuntimeError(
                 "Docker is not available. Please install Docker Desktop or Docker Engine."
             )
@@ -142,44 +138,26 @@ class LocalDockerProvider(ContainerProvider):
             port: Port to expose (if None, finds available port)
             env_vars: Environment variables for the container
             **kwargs: Additional Docker run options
-                - memory_gb: Memory limit in GB (default: 4GB)
-                - command_override: List of command args to override container CMD
 
         Returns:
             Base URL to connect to the container
         """
         import subprocess
         import time
-        import logging
-
-        logger = logging.getLogger(__name__)
 
         # Find available port if not specified
         if port is None:
             port = self._find_available_port()
 
-        # Use default memory limit if not specified
-        memory_gb = kwargs.get("memory_gb", 16)
-
         # Generate container name
         self._container_name = self._generate_container_name(image)
 
         # Build docker run command
-        # Use host networking for better performance and consistency with podman
-        # NOTE: Do NOT use --rm initially - if container fails to start, we need logs
         cmd = [
-            "docker",
-            "run",
+            "docker", "run",
             "-d",  # Detached
-            "--name",
-            self._container_name,
-            "--network",
-            "host",  # Use host network
-            "--memory",
-            f"{memory_gb}g",  # Limit container memory
-            "--memory-swap",
-            f"{memory_gb}g",  # Prevent swap usage (set equal to --memory)
-            "--oom-kill-disable=false",  # Allow OOM killer (exit gracefully)
+            "--name", self._container_name,
+            "-p", f"{port}:8000",  # Map port
         ]
 
         # Add environment variables
@@ -187,24 +165,13 @@ class LocalDockerProvider(ContainerProvider):
             for key, value in env_vars.items():
                 cmd.extend(["-e", f"{key}={value}"])
 
-        # Pass custom port via environment variable instead of overriding command
-        # This allows the container to use its proper entrypoint/CMD
-        if port != 8000:
-            cmd.extend(["-e", f"PORT={port}"])
-
         # Add image
         cmd.append(image)
 
-        # Add command override if provided (explicit override by user)
-        if "command_override" in kwargs:
-            cmd.extend(kwargs["command_override"])
-
         # Run container
         try:
-            logger.debug(f"Starting container with command: {' '.join(cmd)}")
             result = subprocess.run(cmd, capture_output=True, text=True, check=True)
             self._container_id = result.stdout.strip()
-            logger.debug(f"Container started with ID: {self._container_id}")
         except subprocess.CalledProcessError as e:
             error_msg = f"Failed to start Docker container.\nCommand: {' '.join(cmd)}\nExit code: {e.returncode}\nStderr: {e.stderr}\nStdout: {e.stdout}"
             raise RuntimeError(error_msg) from e
@@ -225,47 +192,24 @@ class LocalDockerProvider(ContainerProvider):
         import subprocess
 
         try:
-            # Try graceful stop first (with longer timeout)
-            print(f"Stopping container {self._container_id[:12]}...")
-            try:
-                subprocess.run(
-                    ["docker", "stop", "-t", "5", self._container_id],
-                    capture_output=True,
-                    timeout=30,
-                )
-            except subprocess.TimeoutExpired:
-                # If graceful stop times out, force kill
-                print(f"Graceful stop timed out, forcing kill...")
-                subprocess.run(
-                    ["docker", "kill", self._container_id],
-                    capture_output=True,
-                    timeout=10,
-                )
-
-            # Remove container
-            print(f"Removing container {self._container_id[:12]}...")
+            # Stop container
             subprocess.run(
-                ["docker", "rm", "-f", self._container_id],
+                ["docker", "stop", self._container_id],
                 capture_output=True,
-                timeout=15,
+                check=True,
+                timeout=10,
             )
 
-            print(f"✓ Container cleaned up successfully")
-
-        except subprocess.TimeoutExpired:
-            # Last resort: force remove
-            print(f"Remove timed out, trying force remove...")
-            try:
-                subprocess.run(
-                    ["docker", "rm", "-f", self._container_id],
-                    capture_output=True,
-                    timeout=10,
-                )
-            except Exception:
-                pass
-        except Exception as e:
-            # Log but don't fail - container might already be gone
-            print(f"Note: Cleanup had issues (container may already be removed): {e}")
+            # Remove container
+            subprocess.run(
+                ["docker", "rm", self._container_id],
+                capture_output=True,
+                check=True,
+                timeout=10,
+            )
+        except subprocess.CalledProcessError:
+            # Container might already be stopped/removed
+            pass
         finally:
             self._container_id = None
             self._container_name = None
@@ -287,46 +231,18 @@ class LocalDockerProvider(ContainerProvider):
         start_time = time.time()
         health_url = f"{base_url}/health"
 
-        # Create session with proxy bypass for localhost
-        session = requests.Session()
-        if "localhost" in base_url or "127.0.0.1" in base_url:
-            session.trust_env = False  # Ignore environment proxy settings
-
         while time.time() - start_time < timeout_s:
             try:
-                response = session.get(health_url, timeout=2.0)
+                response = requests.get(health_url, timeout=2.0)
                 if response.status_code == 200:
-                    session.close()
                     return
             except requests.RequestException:
                 pass
 
             time.sleep(0.5)
 
-        session.close()
-
-        # Get container logs for debugging
-        logs_snippet = ""
-        if self._container_id:
-            try:
-                import subprocess
-
-                result = subprocess.run(
-                    ["docker", "logs", "--tail", "20", self._container_id],
-                    capture_output=True,
-                    text=True,
-                    timeout=5,
-                )
-                if result.stdout or result.stderr:
-                    logs_snippet = "\n\nContainer logs (last 20 lines):\n"
-                    logs_snippet += result.stdout + result.stderr
-            except Exception:
-                pass
-
         raise TimeoutError(
-            f"Container at {base_url} did not become ready within {timeout_s}s. "
-            f"The container is still running and will be cleaned up automatically. "
-            f"Try increasing wait_timeout (e.g., wait_timeout=60.0 or higher).{logs_snippet}"
+            f"Container at {base_url} did not become ready within {timeout_s}s"
         )
 
     def _find_available_port(self) -> int:
@@ -374,5 +290,4 @@ class KubernetesProvider(ContainerProvider):
         >>> # Pod running in k8s, accessible via service or port-forward
         >>> provider.stop_container()
     """
-
     pass

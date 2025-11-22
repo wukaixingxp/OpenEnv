@@ -9,21 +9,26 @@ Environment Auto-Discovery System
 ==================================
 
 This module provides automatic discovery of OpenEnv environments by:
-1. Scanning the src/envs/ directory for environment directories
-2. Loading manifests (from openenv.yaml or conventions)
+1. Discovering installed openenv-* packages using importlib.metadata
+2. Loading manifests (openenv.yaml) from package resources
 3. Caching results for performance
+4. Supporting HuggingFace Hub downloads
 
-This enables AutoEnv to work without a manual registry.
+This enables AutoEnv to work without coupling to src/envs/ directory.
 """
 
 import importlib
+import importlib.metadata
+import importlib.resources
 import json
 import logging
+import re
+import tempfile
 from dataclasses import dataclass, asdict
 from pathlib import Path
 from typing import Dict, List, Optional, Type, Any
 
-from ._manifest import load_manifest, EnvironmentManifest
+import yaml
 
 logger = logging.getLogger(__name__)
 
@@ -36,27 +41,24 @@ class EnvironmentInfo:
     Attributes:
         env_key: Environment key (e.g., "echo", "coding")
         name: Full environment name (e.g., "echo_env")
+        package_name: Package name (e.g., "openenv-echo_env")
         version: Version string
         description: Human-readable description
-        env_dir: Path to environment directory
-        client_module_path: Full module path to client (e.g., "envs.echo_env.client")
-        action_module_path: Full module path to action module
-        observation_module_path: Full module path to observation module
+        client_module_path: Full module path to client (e.g., "echo_env.client")
         client_class_name: Client class name (e.g., "EchoEnv")
         action_class_name: Action class name (e.g., "EchoAction")
-        observation_class_name: Observation class name
+        observation_class_name: Observation class name (e.g., "EchoObservation")
         default_image: Default Docker image name (e.g., "echo-env:latest")
         spec_version: OpenEnv spec version (from openenv.yaml)
         manifest: Original manifest data
     """
+
     env_key: str
     name: str
+    package_name: str
     version: str
     description: str
-    env_dir: str
     client_module_path: str
-    action_module_path: str
-    observation_module_path: str
     client_class_name: str
     action_class_name: str
     observation_class_name: str
@@ -79,7 +81,9 @@ class EnvironmentInfo:
             return getattr(module, self.client_class_name)
         except ImportError as e:
             raise ImportError(
-                f"Failed to import {self.client_class_name} from {self.client_module_path}: {e}"
+                f"Failed to import {self.client_class_name} from {self.client_module_path}: {e}\n"
+                f"Make sure the package '{self.package_name}' is installed: "
+                f"pip install {self.package_name}"
             ) from e
         except AttributeError as e:
             raise ImportError(
@@ -97,15 +101,17 @@ class EnvironmentInfo:
             ImportError: If module or class cannot be imported
         """
         try:
-            module = importlib.import_module(self.action_module_path)
+            module = importlib.import_module(self.client_module_path)
             return getattr(module, self.action_class_name)
         except ImportError as e:
             raise ImportError(
-                f"Failed to import {self.action_class_name} from {self.action_module_path}: {e}"
+                f"Failed to import {self.action_class_name} from {self.client_module_path}: {e}\n"
+                f"Make sure the package '{self.package_name}' is installed: "
+                f"pip install {self.package_name}"
             ) from e
         except AttributeError as e:
             raise ImportError(
-                f"Class {self.action_class_name} not found in {self.action_module_path}: {e}"
+                f"Class {self.action_class_name} not found in {self.client_module_path}: {e}"
             ) from e
 
     def get_observation_class(self) -> Type:
@@ -119,108 +125,264 @@ class EnvironmentInfo:
             ImportError: If module or class cannot be imported
         """
         try:
-            module = importlib.import_module(self.observation_module_path)
+            module = importlib.import_module(self.client_module_path)
             return getattr(module, self.observation_class_name)
         except ImportError as e:
             raise ImportError(
-                f"Failed to import {self.observation_class_name} from {self.observation_module_path}: {e}"
+                f"Failed to import {self.observation_class_name} from {self.client_module_path}: {e}\n"
+                f"Make sure the package '{self.package_name}' is installed: "
+                f"pip install {self.package_name}"
             ) from e
         except AttributeError as e:
             raise ImportError(
-                f"Class {self.observation_class_name} not found in {self.observation_module_path}: {e}"
+                f"Class {self.observation_class_name} not found in {self.client_module_path}: {e}"
             ) from e
+
+
+def _normalize_env_name(name: str) -> str:
+    """
+    Normalize environment name to standard format.
+
+    Args:
+        name: Input name (e.g., "echo", "echo-env", "echo_env")
+
+    Returns:
+        Normalized name (e.g., "echo_env")
+
+    Examples:
+        >>> _normalize_env_name("echo")
+        'echo_env'
+        >>> _normalize_env_name("echo-env")
+        'echo_env'
+        >>> _normalize_env_name("echo_env")
+        'echo_env'
+    """
+    # Remove common suffixes
+    name = re.sub(r"[-_]env$", "", name)
+    # Convert hyphens to underscores
+    name = name.replace("-", "_")
+    # Add _env suffix if not present
+    if not name.endswith("_env"):
+        name = f"{name}_env"
+    return name
+
+
+def _is_hub_url(name: str) -> bool:
+    """
+    Check if name is a HuggingFace Hub URL or repo ID.
+
+    Args:
+        name: Input name
+
+    Returns:
+        True if it looks like a Hub URL
+
+    Examples:
+        >>> _is_hub_url("meta-pytorch/echo-env")
+        True
+        >>> _is_hub_url("https://huggingface.co/meta-pytorch/echo-env")
+        True
+        >>> _is_hub_url("echo")
+        False
+    """
+    # Contains org/repo pattern or huggingface.co domain
+    return "/" in name or "huggingface.co" in name
+
+
+def _infer_class_name(env_name: str, class_type: str) -> str:
+    """
+    Infer class name from environment name using simple conventions.
+
+    Args:
+        env_name: Environment name (e.g., "echo_env")
+        class_type: Type of class ("client", "action", "observation")
+
+    Returns:
+        Inferred class name
+
+    Examples:
+        >>> _infer_class_name("echo_env", "client")
+        'EchoEnv'
+        >>> _infer_class_name("echo_env", "action")
+        'EchoAction'
+    """
+    # Remove _env suffix for base name
+    base_name = env_name.replace("_env", "")
+
+    # Convert to PascalCase
+    pascal_name = "".join(word.capitalize() for word in base_name.split("_"))
+
+    # Add suffix based on type
+    if class_type == "client":
+        return f"{pascal_name}Env"
+    elif class_type == "action":
+        return f"{pascal_name}Action"
+    elif class_type == "observation":
+        return f"{pascal_name}Observation"
+    else:
+        raise ValueError(f"Unknown class type: {class_type}")
+
+
+def _load_manifest_from_package(package_name: str, module_name: str) -> Optional[Dict[str, Any]]:
+    """
+    Load openenv.yaml manifest from an installed package.
+
+    Args:
+        package_name: Package name (e.g., "openenv-echo_env")
+        module_name: Module name (e.g., "echo_env")
+
+    Returns:
+        Parsed manifest dictionary, or None if not found
+
+    """
+    try:
+        # Try to read openenv.yaml from package
+        if hasattr(importlib.resources, 'files'):
+            # Python 3.9+
+            package_files = importlib.resources.files(module_name)
+            if (package_files / "openenv.yaml").is_file():
+                manifest_text = (package_files / "openenv.yaml").read_text()
+                return yaml.safe_load(manifest_text)
+        else:
+            # Python 3.7-3.8 fallback
+            with importlib.resources.open_text(module_name, "openenv.yaml") as f:
+                return yaml.safe_load(f)
+    except (FileNotFoundError, ModuleNotFoundError, AttributeError):
+        logger.debug(f"No openenv.yaml found in {module_name}")
+        return None
+    except Exception as e:
+        logger.warning(f"Failed to load openenv.yaml from {module_name}: {e}")
+        return None
+
+
+def _create_env_info_from_package(package_name: str, module_name: str, version: str) -> Optional[EnvironmentInfo]:
+    """
+    Create EnvironmentInfo from an installed package.
+
+    Args:
+        package_name: Package name (e.g., "openenv-echo_env")
+        module_name: Module name (e.g., "echo_env")
+        version: Package version
+
+    Returns:
+        EnvironmentInfo instance, or None if invalid
+    """
+    # Load manifest
+    manifest = _load_manifest_from_package(package_name, module_name)
+
+    # Get environment name
+    if manifest and "name" in manifest:
+        env_name = manifest["name"]
+    else:
+        # Infer from module name
+        env_name = module_name
+
+    # Normalize to ensure _env suffix
+    if not env_name.endswith("_env"):
+        env_name = f"{env_name}_env"
+
+    # Determine env_key (e.g., "echo_env" → "echo")
+    env_key = env_name.replace("_env", "") if env_name.endswith("_env") else env_name
+
+    # Get description
+    description = manifest.get("description", f"{env_name} environment") if manifest else f"{env_name} environment"
+
+    # Get spec version
+    spec_version = manifest.get("spec_version") if manifest else None
+
+    # Determine class names
+    # Check if manifest has custom class names (custom format)
+    if manifest and "action" in manifest and "observation" in manifest:
+        # Custom format (like coding_env)
+        client_class_name = _infer_class_name(env_name, "client")
+        action_class_name = manifest.get("action", _infer_class_name(env_name, "action"))
+        observation_class_name = manifest.get("observation", _infer_class_name(env_name, "observation"))
+    else:
+        # Use conventions
+        client_class_name = _infer_class_name(env_name, "client")
+        action_class_name = _infer_class_name(env_name, "action")
+        observation_class_name = _infer_class_name(env_name, "observation")
+
+    # Module path is just module_name.client
+    client_module_path = f"{module_name}.client"
+
+    # Determine default Docker image name
+    image_name = env_name.replace("_", "-")
+    default_image = f"{image_name}:latest"
+
+    return EnvironmentInfo(
+        env_key=env_key,
+        name=env_name,
+        package_name=package_name,
+        version=version,
+        description=description,
+        client_module_path=client_module_path,
+        client_class_name=client_class_name,
+        action_class_name=action_class_name,
+        observation_class_name=observation_class_name,
+        default_image=default_image,
+        spec_version=spec_version,
+        manifest=manifest,
+    )
 
 
 class EnvironmentDiscovery:
     """
-    Auto-discovery system for OpenEnv environments.
+    Auto-discovery system for OpenEnv environments using installed packages.
 
-    This class scans a directory for environments, loads their manifests,
-    and caches the results for performance.
+    This class discovers installed openenv-* packages and loads their metadata.
     """
 
-    def __init__(self, envs_dir: Path, module_prefix: str = "envs"):
-        """
-        Initialize discovery system.
-
-        Args:
-            envs_dir: Directory containing environments (e.g., /path/to/src/envs)
-            module_prefix: Module prefix for imports (e.g., "envs")
-        """
-        self.envs_dir = Path(envs_dir)
-        self.module_prefix = module_prefix
-        self._cache_file = self.envs_dir / ".discovery_cache.json"
+    def __init__(self):
+        """Initialize discovery system."""
         self._cache: Optional[Dict[str, EnvironmentInfo]] = None
+        self._cache_file = Path(tempfile.gettempdir()) / "openenv_discovery_cache.json"
 
-    def _is_valid_env_dir(self, dir_path: Path) -> bool:
+    def _discover_installed_packages(self) -> Dict[str, EnvironmentInfo]:
         """
-        Check if a directory is a valid environment directory.
-
-        A directory is considered valid if it:
-        - Is a directory (not a file)
-        - Doesn't start with . or _
-        - Contains client.py or server/ subdirectory
-
-        Args:
-            dir_path: Path to check
+        Discover all installed openenv-* packages.
 
         Returns:
-            True if valid environment directory
+            Dictionary mapping env_key to EnvironmentInfo
         """
-        if not dir_path.is_dir():
-            return False
+        environments = {}
 
-        # Skip hidden directories and special directories
-        if dir_path.name.startswith(".") or dir_path.name.startswith("_"):
-            return False
+        # Get all installed packages
+        try:
+            distributions = importlib.metadata.distributions()
+        except Exception as e:
+            logger.warning(f"Failed to get installed packages: {e}")
+            return environments
 
-        # Check for client.py or server/ directory
-        has_client = (dir_path / "client.py").exists()
-        has_server = (dir_path / "server").is_dir()
+        # Filter for openenv-* packages (exclude openenv-core)
+        for dist in distributions:
+            package_name = dist.metadata["Name"]
 
-        return has_client or has_server
+            if not package_name.startswith("openenv-"):
+                continue
 
-    def _create_env_info(self, manifest: EnvironmentManifest, env_dir: Path) -> EnvironmentInfo:
-        """
-        Create EnvironmentInfo from a manifest.
+            if package_name == "openenv-core":
+                continue
 
-        Args:
-            manifest: Parsed environment manifest
-            env_dir: Path to environment directory
+            # Get module name (e.g., "openenv-echo_env" → "echo_env")
+            module_name = package_name.replace("openenv-", "").replace("-", "_")
 
-        Returns:
-            EnvironmentInfo instance
-        """
-        # Determine env_key (e.g., "echo_env" → "echo")
-        env_key = manifest.name.replace("_env", "") if manifest.name.endswith("_env") else manifest.name
+            # Get version
+            version = dist.version
 
-        # Construct module paths
-        # e.g., "envs.echo_env.client"
-        client_module_path = f"{self.module_prefix}.{manifest.name}.{manifest.client.module}"
-        action_module_path = f"{self.module_prefix}.{manifest.name}.{manifest.action.module}"
-        observation_module_path = f"{self.module_prefix}.{manifest.name}.{manifest.observation.module}"
+            try:
+                # Create environment info
+                env_info = _create_env_info_from_package(package_name, module_name, version)
 
-        # Determine default Docker image name
-        # e.g., "echo_env" → "echo-env:latest"
-        image_name = manifest.name.replace("_", "-")
-        default_image = f"{image_name}:latest"
+                if env_info:
+                    environments[env_info.env_key] = env_info
+                    logger.debug(f"Discovered environment: {env_info.env_key} ({package_name})")
 
-        return EnvironmentInfo(
-            env_key=env_key,
-            name=manifest.name,
-            version=manifest.version,
-            description=manifest.description,
-            env_dir=str(env_dir),
-            client_module_path=client_module_path,
-            action_module_path=action_module_path,
-            observation_module_path=observation_module_path,
-            client_class_name=manifest.client.class_name,
-            action_class_name=manifest.action.class_name,
-            observation_class_name=manifest.observation.class_name,
-            default_image=default_image,
-            spec_version=manifest.spec_version,
-            manifest=manifest.raw_data
-        )
+            except Exception as e:
+                logger.warning(f"Failed to load environment from {package_name}: {e}")
+                continue
+
+        return environments
 
     def _load_cache(self) -> Optional[Dict[str, EnvironmentInfo]]:
         """
@@ -266,7 +428,7 @@ class EnvironmentDiscovery:
 
     def discover(self, use_cache: bool = True) -> Dict[str, EnvironmentInfo]:
         """
-        Discover all environments in the envs directory.
+        Discover all installed OpenEnv environments.
 
         Args:
             use_cache: If True, try to load from cache first
@@ -275,47 +437,24 @@ class EnvironmentDiscovery:
             Dictionary mapping env_key to EnvironmentInfo
 
         Examples:
-            >>> discovery = EnvironmentDiscovery(Path("src/envs"))
+            >>> discovery = EnvironmentDiscovery()
             >>> envs = discovery.discover()
             >>> print(envs.keys())
-            dict_keys(['echo', 'coding', 'atari', ...])
+            dict_keys(['echo', 'coding', ...])
         """
-        # Try to load from cache first
+        # Try to load from memory cache first
         if use_cache and self._cache is not None:
             return self._cache
 
+        # Try to load from file cache
         if use_cache:
             cached = self._load_cache()
             if cached is not None:
                 self._cache = cached
                 return self._cache
 
-        # Scan directory for environments
-        environments = {}
-
-        if not self.envs_dir.exists():
-            logger.warning(f"Environments directory not found: {self.envs_dir}")
-            return environments
-
-        for item in self.envs_dir.iterdir():
-            if not self._is_valid_env_dir(item):
-                continue
-
-            try:
-                # Load manifest (from openenv.yaml or conventions)
-                manifest = load_manifest(item)
-
-                # Create environment info
-                env_info = self._create_env_info(manifest, item)
-
-                # Add to discovered environments
-                environments[env_info.env_key] = env_info
-
-                logger.debug(f"Discovered environment: {env_info.env_key}")
-
-            except Exception as e:
-                logger.warning(f"Failed to load environment from {item}: {e}")
-                continue
+        # Discover from installed packages
+        environments = self._discover_installed_packages()
 
         # Save to cache
         self._save_cache(environments)
@@ -334,7 +473,7 @@ class EnvironmentDiscovery:
             EnvironmentInfo if found, None otherwise
 
         Examples:
-            >>> discovery = EnvironmentDiscovery(Path("src/envs"))
+            >>> discovery = EnvironmentDiscovery()
             >>> env = discovery.get_environment("echo")
             >>> print(env.client_class_name)
             'EchoEnv'
@@ -342,27 +481,48 @@ class EnvironmentDiscovery:
         environments = self.discover()
         return environments.get(env_key)
 
+    def get_environment_by_name(self, name: str) -> Optional[EnvironmentInfo]:
+        """
+        Get environment info by flexible name matching.
+
+        Args:
+            name: Environment name (e.g., "echo", "echo-env", "echo_env")
+
+        Returns:
+            EnvironmentInfo if found, None otherwise
+        """
+        # Normalize name to env_key
+        normalized = _normalize_env_name(name)
+        env_key = normalized.replace("_env", "")
+
+        return self.get_environment(env_key)
+
     def list_environments(self) -> None:
         """
         Print a formatted list of all discovered environments.
 
         Examples:
-            >>> discovery = EnvironmentDiscovery(Path("src/envs"))
+            >>> discovery = EnvironmentDiscovery()
             >>> discovery.list_environments()
-            Discovered Environments:
+            Available OpenEnv Environments:
             ----------------------------------------------------------------------
-              echo           : Echo Env environment (v0.1.0)
-              coding         : Coding Env environment (v0.1.0)
+              echo           : Echo Environment (v0.1.0) - openenv-echo_env
+              coding         : Coding Environment (v0.1.0) - openenv-coding_env
               ...
         """
         environments = self.discover()
 
-        print("Discovered Environments:")
+        print("Available OpenEnv Environments:")
         print("-" * 70)
 
-        for env_key in sorted(environments.keys()):
-            env = environments[env_key]
-            print(f"  {env_key:<15}: {env.description} (v{env.version})")
+        if not environments:
+            print("  No OpenEnv environments found.")
+            print("  Install environments with: pip install openenv-<env-name>")
+        else:
+            for env_key in sorted(environments.keys()):
+                env = environments[env_key]
+                print(f"  {env_key:<15}: {env.description} (v{env.version})")
+                print(f"                   Package: {env.package_name}")
 
         print("-" * 70)
         print(f"Total: {len(environments)} environments")
@@ -378,13 +538,9 @@ class EnvironmentDiscovery:
 _global_discovery: Optional[EnvironmentDiscovery] = None
 
 
-def get_discovery(envs_dir: Optional[Path] = None, module_prefix: str = "envs") -> EnvironmentDiscovery:
+def get_discovery() -> EnvironmentDiscovery:
     """
     Get or create the global discovery instance.
-
-    Args:
-        envs_dir: Directory containing environments (default: src/envs relative to this file)
-        module_prefix: Module prefix for imports (default: "envs")
 
     Returns:
         Global EnvironmentDiscovery instance
@@ -396,13 +552,7 @@ def get_discovery(envs_dir: Optional[Path] = None, module_prefix: str = "envs") 
     global _global_discovery
 
     if _global_discovery is None:
-        if envs_dir is None:
-            # Default to src/envs relative to this file
-            # This file is in src/envs/_discovery.py
-            # So parent is src/envs/
-            envs_dir = Path(__file__).parent
-
-        _global_discovery = EnvironmentDiscovery(envs_dir, module_prefix)
+        _global_discovery = EnvironmentDiscovery()
 
     return _global_discovery
 
@@ -410,4 +560,6 @@ def get_discovery(envs_dir: Optional[Path] = None, module_prefix: str = "envs") 
 def reset_discovery() -> None:
     """Reset the global discovery instance (useful for testing)."""
     global _global_discovery
+    if _global_discovery is not None:
+        _global_discovery.clear_cache()
     _global_discovery = None

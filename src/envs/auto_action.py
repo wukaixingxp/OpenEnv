@@ -9,7 +9,7 @@ AutoAction - Automatic Action Class Selection
 ==============================================
 
 AutoAction provides a HuggingFace-style API for automatically retrieving the
-correct Action class based on environment names.
+correct Action class from installed packages or HuggingFace Hub.
 
 This module simplifies working with environment actions by automatically
 detecting and returning the appropriate Action class without requiring
@@ -19,13 +19,11 @@ Example:
     >>> from envs import AutoEnv, AutoAction
     >>>
     >>> # Get Action class from environment name
-    >>> CodeAction = AutoAction.from_env("coding")
-    >>>
-    >>> # Or get Action class from environment image name
-    >>> CodeAction = AutoAction.from_name("coding-env")
-    >>>
-    >>> # Use the Action class
+    >>> CodeAction = AutoAction.from_name("coding")
     >>> action = CodeAction(code="print('Hello!')")
+    >>>
+    >>> # From HuggingFace Hub
+    >>> CodeAction = AutoAction.from_name("meta-pytorch/coding-env")
     >>>
     >>> # Use with AutoEnv
     >>> env = AutoEnv.from_name("coding-env")
@@ -34,32 +32,33 @@ Example:
 
 from __future__ import annotations
 
-import importlib
-import re
-import warnings
-from typing import Type
+import logging
+from typing import Type, Dict, Any
 
-from ._discovery import get_discovery
+from ._discovery import get_discovery, _is_hub_url
+from .auto_env import AutoEnv
+
+logger = logging.getLogger(__name__)
 
 
 class AutoAction:
     """
     AutoAction automatically retrieves the correct Action class based on
-    environment names.
+    environment names or HuggingFace Hub repositories.
 
     This class follows the HuggingFace AutoModel pattern, making it easy to
     get the right Action class without needing to know which module to import.
 
-    The class provides factory methods that look up the Action class in the
-    registry and return the class (not an instance) for you to instantiate.
+    The class provides factory methods that look up the Action class and
+    return the class (not an instance) for you to instantiate.
 
     Example:
-        >>> # Get Action class from environment name
+        >>> # From installed package
         >>> CodeAction = AutoAction.from_name("coding")
         >>> action = CodeAction(code="print('test')")
         >>>
-        >>> # Get Action class from environment image name
-        >>> CodeAction = AutoAction.from_name("coding-env")
+        >>> # From HuggingFace Hub
+        >>> CodeAction = AutoAction.from_name("meta-pytorch/coding-env")
         >>> action = CodeAction(code="print('test')")
         >>>
         >>> # Use with AutoEnv for a complete workflow
@@ -81,249 +80,185 @@ class AutoAction:
         )
 
     @classmethod
-    def _parse_env_name_from_image(cls, image: str) -> str:
-        """
-        Extract environment name from Docker image string.
-
-        This method uses the same parsing logic as AutoEnv to ensure consistency.
-
-        Supports various image name formats:
-        - "coding-env:latest" -> "coding"
-        - "ghcr.io/openenv/coding-env:v1.0" -> "coding"
-        - "registry.hf.space/org-name-coding-env:latest" -> "coding"
-
-        Args:
-            image: Docker image name
-
-        Returns:
-            Environment key (e.g., "coding", "atari")
-
-        Raises:
-            ValueError: If image name format is invalid
-        """
-        # Remove registry prefix if present
-        image_without_registry = re.sub(r"^[a-z0-9._-]+\.[a-z]+/", "", image, flags=re.IGNORECASE)
-
-        # Remove organization/path prefix if present
-        image_without_org = image_without_registry.split("/")[-1]
-
-        # Remove tag if present
-        image_without_tag = image_without_org.split(":")[0]
-
-        # Extract environment name
-        # Pattern: "{env-name}-env" -> "{env-name}"
-        # Also support HF format: "org-name-{env-name}-env" -> "{env-name}"
-        if image_without_tag.endswith("-env"):
-            # Remove the "-env" suffix
-            base_name = image_without_tag[:-4]
-            
-            # For HF format like "org-name-coding-env", we need the last part before "-env"
-            # Split by hyphen and look for known environment names from the end
-            parts = base_name.split("-")
-            
-            # Try to find a match from the registry starting from the end
-            # This handles cases like "openenv-coding" -> "coding"
-            for i in range(len(parts)):
-                potential_env = "-".join(parts[i:]).replace("-", "_")
-                if potential_env in ["sumo_rl"]:  # Special case for underscore envs
-                    return potential_env.lower()
-                
-                # Check if it could be a valid env name (simple word)
-                if i == len(parts) - 1 or len(parts[i:]) == 1:
-                    # Last part or single word - likely the env name
-                    env_name = parts[-1]
-                    return env_name.lower()
-            
-            # If we got here, just use the base name
-            env_name = base_name
-        else:
-            # No "-env" suffix, use as-is
-            env_name = image_without_tag
-        
-        # Clean up: keep underscores
-        env_name = env_name.replace("_", "_")
-        
-        # Validate it looks like an environment name
-        if not re.match(r"^[a-z0-9_]+$", env_name, re.IGNORECASE):
-            raise ValueError(
-                f"Invalid Docker image name format: '{image}'. "
-                f"Expected format: '{{env-name}}-env:{{tag}}' or '{{registry}}/{{org}}/{{env-name}}-env:{{tag}}'"
-            )
-
-        return env_name.lower()
-
-    @classmethod
-    def _get_action_class(cls, env_key: str) -> Type:
-        """
-        Dynamically import and return the Action class for an environment.
-
-        Uses auto-discovery to find and load the action class.
-
-        Args:
-            env_key: Environment key (e.g., "coding", "atari")
-
-        Returns:
-            Action class type (not an instance)
-
-        Raises:
-            ImportError: If module or class cannot be imported
-            ValueError: If environment not found
-        """
-        # Use discovery to find environment
-        discovery = get_discovery()
-        env_info = discovery.get_environment(env_key)
-
-        if env_info is None:
-            # Try to suggest similar environment names
-            from difflib import get_close_matches
-
-            all_envs = discovery.discover()
-            suggestions = get_close_matches(env_key, all_envs.keys(), n=3, cutoff=0.6)
-            suggestion_str = ""
-            if suggestions:
-                suggestion_str = f" Did you mean: {', '.join(suggestions)}?"
-
-            raise ValueError(
-                f"Unknown environment '{env_key}'. "
-                f"Supported environments: {', '.join(sorted(all_envs.keys()))}.{suggestion_str}"
-            )
-
-        # Import and return the action class
-        try:
-            return env_info.get_action_class()
-        except ImportError as e:
-            raise ImportError(
-                f"Failed to import {env_info.action_class_name} from {env_info.action_module_path}: {e}. "
-                f"Make sure the environment package is installed."
-            ) from e
-
-    @classmethod
     def from_name(cls, name: str) -> Type:
         """
-        Get the Action class for an environment by parsing its name.
+        Get the Action class from environment name or HuggingFace Hub repository.
 
-        This method takes an environment name (with or without suffix and tag),
-        extracts the environment type, and returns the corresponding Action class.
+        This method automatically:
+        1. Checks if the name is a HuggingFace Hub URL/repo ID
+        2. If Hub: downloads and installs the environment package
+        3. If local: looks up the installed openenv-* package
+        4. Imports and returns the Action class
 
         Args:
-            name: Environment name (e.g., "coding-env", "coding-env:latest", or "coding")
-                  If no tag is provided, it is automatically handled
+            name: Environment name or HuggingFace Hub repo ID
+                  Examples:
+                  - "coding" / "coding-env" / "coding_env"
+                  - "meta-pytorch/coding-env" (Hub repo ID)
+                  - "https://huggingface.co/meta-pytorch/coding-env" (Hub URL)
 
         Returns:
-            The Action class for the environment (not an instance)
+            Action class (not an instance!)
 
         Raises:
-            ValueError: If name cannot be parsed or environment not found
-            ImportError: If Action class module cannot be imported
+            ValueError: If environment not found
+            ImportError: If environment package is not installed
 
         Examples:
-            >>> # Get CodeAction from environment name
+            >>> # From installed package
             >>> CodeAction = AutoAction.from_name("coding-env")
             >>> action = CodeAction(code="print('Hello!')")
             >>>
-            >>> # With tag
-            >>> CodeAction = AutoAction.from_name("coding-env:v1.0")
-            >>> action = CodeAction(code="x = 5 + 3")
+            >>> # From HuggingFace Hub
+            >>> CodeAction = AutoAction.from_name("meta-pytorch/coding-env")
+            >>> action = CodeAction(code="print('Hello!')")
             >>>
-            >>> # With full registry path
-            >>> CodeAction = AutoAction.from_name("ghcr.io/openenv/coding-env:v1.0")
-            >>> action = CodeAction(code="import math")
-            >>>
-            >>> # From Hugging Face Hub format
-            >>> CodeAction = AutoAction.from_name("registry.hf.space/openenv-coding-env:latest")
-            >>> action = CodeAction(code="import math")
+            >>> # Different name formats
+            >>> EchoAction = AutoAction.from_name("echo")
+            >>> EchoAction = AutoAction.from_name("echo-env")
+            >>> EchoAction = AutoAction.from_name("echo_env")
         """
-        # Normalize name to image format
-        image = name
-        if ":" not in name:
-            # No tag provided, add :latest
-            if not name.endswith("-env"):
-                # Name is like "coding", convert to "coding-env:latest"
-                image = f"{name}-env:latest"
-            else:
-                # Name is like "coding-env", add :latest
-                image = f"{name}:latest"
-        elif not name.split(":")[0].endswith("-env"):
-            # Has tag but no -env suffix, add -env
-            # e.g., "coding:v1.0" -> "coding-env:v1.0"
-            base, tag = name.split(":", 1)
-            image = f"{base}-env:{tag}"
+        # Check if it's a HuggingFace Hub URL or repo ID
+        if _is_hub_url(name):
+            # Download from Hub and install (reuse AutoEnv logic)
+            env_path = AutoEnv._download_from_hub(name)
+            package_name = AutoEnv._install_from_path(env_path)
 
-        env_key = cls._parse_env_name_from_image(image)
-        return cls._get_action_class(env_key)
+            # Clear discovery cache to pick up the newly installed package
+            get_discovery().clear_cache()
+
+            # Extract environment name from package name
+            # "openenv-coding_env" -> "coding_env"
+            env_name = package_name.replace("openenv-", "").replace("-", "_")
+        else:
+            env_name = name
+
+        # Get environment info from discovery
+        discovery = get_discovery()
+        env_info = discovery.get_environment_by_name(env_name)
+
+        if not env_info:
+            # Environment not found - provide helpful error message
+            available_envs = discovery.discover()
+
+            if not available_envs:
+                raise ValueError(
+                    f"No OpenEnv environments found.\n"
+                    f"Install an environment with: pip install openenv-<env-name>\n"
+                    f"Or specify a HuggingFace Hub repository: AutoAction.from_name('org/repo')"
+                )
+
+            # Try to suggest similar environment names
+            from difflib import get_close_matches
+
+            env_keys = list(available_envs.keys())
+            suggestions = get_close_matches(env_name, env_keys, n=3, cutoff=0.6)
+
+            error_msg = f"Unknown environment '{env_name}'.\n"
+            if suggestions:
+                error_msg += f"Did you mean: {', '.join(suggestions)}?\n"
+            error_msg += f"Available environments: {', '.join(sorted(env_keys))}"
+
+            raise ValueError(error_msg)
+
+        # Get the action class
+        try:
+            action_class = env_info.get_action_class()
+            return action_class
+        except ImportError as e:
+            raise ImportError(
+                f"Failed to import action class for '{env_name}'.\n"
+                f"Package '{env_info.package_name}' appears to be installed but the module cannot be imported.\n"
+                f"Try reinstalling: pip install --force-reinstall {env_info.package_name}\n"
+                f"Original error: {e}"
+            ) from e
 
     @classmethod
-    def get_action_info(cls, env_name: str) -> dict:
+    def from_env(cls, env_name: str) -> Type:
         """
-        Get information about the Action class for an environment.
+        Get the Action class from environment name.
 
-        Uses auto-discovery to find action class information.
+        This is an alias for from_name() for backward compatibility and clarity.
 
         Args:
-            env_name: Environment name (e.g., "coding", "atari")
+            env_name: Environment name (e.g., "coding", "echo")
 
         Returns:
-            Dictionary with Action class information including module and class name
+            Action class (not an instance!)
+
+        Examples:
+            >>> CodeAction = AutoAction.from_env("coding")
+            >>> action = CodeAction(code="print('Hello!')")
+        """
+        return cls.from_name(env_name)
+
+    @classmethod
+    def get_action_info(cls, name: str) -> Dict[str, Any]:
+        """
+        Get detailed information about an action class.
+
+        Args:
+            name: Environment name
+
+        Returns:
+            Dictionary with action class metadata
 
         Raises:
             ValueError: If environment not found
 
-        Example:
+        Examples:
             >>> info = AutoAction.get_action_info("coding")
-            >>> print(info["action_class"])  # "CodeAction"
-            >>> print(info["module"])  # "envs.coding_env.client"
+            >>> print(info['action_class'])
+            'CodingAction'
+            >>> print(info['module'])
+            'coding_env.client'
         """
-        env_key = env_name.lower()
-
-        # Use discovery
         discovery = get_discovery()
-        env_info = discovery.get_environment(env_key)
+        env_info = discovery.get_environment_by_name(name)
 
-        if env_info is None:
-            raise ValueError(
-                f"Environment '{env_key}' not found. Use AutoAction.list_actions() "
-                f"to see all available action classes."
-            )
+        if not env_info:
+            raise ValueError(f"Unknown environment: {name}")
 
         return {
+            "env_key": env_info.env_key,
+            "env_name": env_info.name,
+            "package": env_info.package_name,
             "action_class": env_info.action_class_name,
-            "module": env_info.action_module_path,
-            "env_class": env_info.client_class_name,
-            "description": env_info.description,
+            "observation_class": env_info.observation_class_name,
+            "module": env_info.client_module_path,
         }
 
     @classmethod
     def list_actions(cls) -> None:
         """
-        Print a list of all available Action classes.
+        Print a formatted list of all available action classes.
 
-        Uses auto-discovery to find all action classes.
+        This discovers all installed openenv-* packages and displays
+        their action class information in a user-friendly format.
 
-        Example:
+        Examples:
             >>> AutoAction.list_actions()
             Available Action Classes:
             ----------------------------------------------------------------------
-            atari          : AtariAction         (Atari Env environment)
-            coding         : CodeAction          (Coding Env environment)
-            echo           : EchoAction          (Echo Env environment)
-            ...
+              echo           : EchoAction (from openenv-echo-env)
+              coding         : CodingAction (from openenv-coding_env)
+            ----------------------------------------------------------------------
+            Total: 2 action classes
         """
-        # Use discovery
         discovery = get_discovery()
-        discovered_envs = discovery.discover()
+        environments = discovery.discover()
 
-        if discovered_envs:
-            print("Available Action Classes:")
-            print("-" * 70)
+        print("Available Action Classes:")
+        print("-" * 70)
 
-            for env_key in sorted(discovered_envs.keys()):
-                env = discovered_envs[env_key]
-                print(f"  {env_key:<15}: {env.action_class_name:<20} ({env.description})")
-
-            print("-" * 70)
-            print(f"Total: {len(discovered_envs)} Action classes")
-            print("\nUsage:")
-            print("  ActionClass = AutoAction.from_name('coding-env')  # or just 'coding'")
+        if not environments:
+            print("  No OpenEnv environments found.")
+            print("  Install environments with: pip install openenv-<env-name>")
         else:
-            print("No action classes found.")
-            print("Make sure your environments are in the src/envs/ directory.")
+            for env_key in sorted(environments.keys()):
+                env = environments[env_key]
+                print(f"  {env_key:<15}: {env.action_class_name}")
+                print(f"                   Package: {env.package_name}")
+
+        print("-" * 70)
+        print(f"Total: {len(environments)} action classes")

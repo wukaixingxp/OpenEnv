@@ -35,6 +35,7 @@ import logging
 import os
 import subprocess
 import tempfile
+import requests
 from pathlib import Path
 from typing import Any, Optional, TYPE_CHECKING, Dict
 
@@ -82,6 +83,62 @@ class AutoEnv:
             "AutoEnv is a factory class and should not be instantiated directly. "
             "Use AutoEnv.from_name() instead."
         )
+
+    @classmethod
+    def _resolve_space_url(cls, repo_id: str) -> str:
+        """
+        Resolve HuggingFace Space repo ID to Space URL.
+
+        Args:
+            repo_id: HuggingFace repo ID (e.g., "wukaixingxp/coding-env-test")
+
+        Returns:
+            Space URL (e.g., "https://wukaixingxp-coding-env-test.hf.space")
+
+        Examples:
+            >>> AutoEnv._resolve_space_url("wukaixingxp/coding-env-test")
+            'https://wukaixingxp-coding-env-test.hf.space'
+        """
+        # Clean up repo_id if it's a full URL
+        if "huggingface.co" in repo_id:
+            # Extract org/repo from URL
+            # https://huggingface.co/wukaixingxp/coding-env-test -> wukaixingxp/coding-env-test
+            parts = repo_id.split("/")
+            if len(parts) >= 2:
+                repo_id = f"{parts[-2]}/{parts[-1]}"
+
+        # Convert user/space-name to user-space-name.hf.space
+        space_slug = repo_id.replace("/", "-")
+        return f"https://{space_slug}.hf.space"
+
+    @classmethod
+    def _check_space_availability(cls, space_url: str, timeout: float = 5.0) -> bool:
+        """
+        Check if HuggingFace Space is running and accessible.
+
+        Args:
+            space_url: Space URL to check
+            timeout: Request timeout in seconds
+
+        Returns:
+            True if Space is accessible, False otherwise
+
+        Examples:
+            >>> AutoEnv._check_space_availability("https://wukaixingxp-coding-env-test.hf.space")
+            True
+        """
+        try:
+            # Try to access the health endpoint
+            response = requests.get(f"{space_url}/health", timeout=timeout)
+            if response.status_code == 200:
+                return True
+            
+            # If health endpoint doesn't exist, try root endpoint
+            response = requests.get(space_url, timeout=timeout)
+            return response.status_code == 200
+        except (requests.RequestException, Exception) as e:
+            logger.debug(f"Space {space_url} not accessible: {e}")
+            return False
 
     @classmethod
     def _download_from_hub(
@@ -186,6 +243,94 @@ class AutoEnv:
             raise ValueError(f"Failed to install environment package: {e}") from e
 
     @classmethod
+    def _get_package_name_from_hub(cls, name: str) -> tuple[str, Path]:
+        """
+        Download Space and get the package name from pyproject.toml.
+        
+        Args:
+            name: HuggingFace repo ID (e.g., "wukaixingxp/coding-env-test")
+            
+        Returns:
+            Tuple of (package_name, env_path)
+            Example: ("openenv-coding_env", Path("/tmp/..."))
+        """
+        # Download from Hub
+        env_path = cls._download_from_hub(name)
+        
+        # Read package name from pyproject.toml
+        import toml
+        
+        pyproject_path = env_path / "pyproject.toml"
+        if not pyproject_path.exists():
+            raise ValueError(
+                f"Environment directory does not contain pyproject.toml: {env_path}"
+            )
+        
+        with open(pyproject_path, "r") as f:
+            pyproject = toml.load(f)
+        
+        package_name = pyproject.get("project", {}).get("name")
+        if not package_name:
+            raise ValueError(
+                f"Could not determine package name from pyproject.toml at {pyproject_path}"
+            )
+        
+        return package_name, env_path
+
+    @classmethod
+    def _is_package_installed(cls, package_name: str) -> bool:
+        """
+        Check if a package is already installed.
+        
+        Args:
+            package_name: Package name (e.g., "openenv-coding_env")
+            
+        Returns:
+            True if installed, False otherwise
+        """
+        try:
+            import importlib.metadata
+            importlib.metadata.distribution(package_name)
+            return True
+        except importlib.metadata.PackageNotFoundError:
+            return False
+
+    @classmethod
+    def _ensure_package_from_hub(cls, name: str) -> str:
+        """
+        Ensure package from HuggingFace Hub is installed.
+        
+        Only downloads and installs if not already installed.
+        
+        Args:
+            name: HuggingFace repo ID (e.g., "wukaixingxp/coding-env-test")
+            
+        Returns:
+            Environment name (e.g., "coding_env")
+        """
+        # Download and get actual package name from pyproject.toml
+        logger.info(f"📦 Checking package from HuggingFace Space...")
+        package_name, env_path = cls._get_package_name_from_hub(name)
+        
+        # Check if already installed
+        if cls._is_package_installed(package_name):
+            logger.info(f"✅ Package already installed: {package_name}")
+            # Clear and refresh discovery cache to make sure it's detected
+            get_discovery().clear_cache()
+            get_discovery().discover(use_cache=False)
+        else:
+            # Not installed, install it now
+            logger.info(f"📦 Package not found, installing: {package_name}")
+            cls._install_from_path(env_path)
+            # Clear discovery cache to pick up the newly installed package
+            get_discovery().clear_cache()
+        
+        # Extract environment name from package name
+        # "openenv-coding_env" -> "coding_env"
+        env_name = package_name.replace("openenv-", "").replace("-", "_")
+        return env_name
+
+    @classmethod
     def from_name(
         cls,
         name: str,
@@ -243,16 +388,31 @@ class AutoEnv:
         """
         # Check if it's a HuggingFace Hub URL or repo ID
         if _is_hub_url(name):
-            # Download from Hub and install
-            env_path = cls._download_from_hub(name)
-            package_name = cls._install_from_path(env_path)
-
-            # Clear discovery cache to pick up the newly installed package
-            get_discovery().clear_cache()
-
-            # Extract environment name from package name
-            # "openenv-coding_env" -> "coding_env"
-            env_name = package_name.replace("openenv-", "").replace("-", "_")
+            # Try to connect to Space directly first
+            space_url = cls._resolve_space_url(name)
+            logger.info(f"Checking if HuggingFace Space is accessible: {space_url}")
+            
+            space_is_available = cls._check_space_availability(space_url)
+            
+            if space_is_available and base_url is None:
+                # Space is accessible! We'll connect directly without Docker
+                logger.info(f"✅ Space is accessible at: {space_url}")
+                logger.info("📦 Installing package for client code (no Docker needed)...")
+                
+                # Ensure package is installed (downloads only if needed)
+                env_name = cls._ensure_package_from_hub(name)
+                
+                # Set base_url to connect to remote Space
+                base_url = space_url
+                logger.info(f"🚀 Will connect to remote Space (no local Docker)")
+            else:
+                # Space not accessible or user provided explicit base_url
+                if not space_is_available:
+                    logger.info(f"❌ Space not accessible at {space_url}")
+                    logger.info("📦 Falling back to local Docker mode...")
+                
+                # Ensure package is installed (downloads only if needed)
+                env_name = cls._ensure_package_from_hub(name)
         else:
             env_name = name
 

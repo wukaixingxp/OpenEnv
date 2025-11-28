@@ -120,16 +120,8 @@ class AutoAction:
         """
         # Check if it's a HuggingFace Hub URL or repo ID
         if _is_hub_url(name):
-            # Download from Hub and install (reuse AutoEnv logic)
-            env_path = AutoEnv._download_from_hub(name)
-            package_name = AutoEnv._install_from_path(env_path)
-
-            # Clear discovery cache to pick up the newly installed package
-            get_discovery().clear_cache()
-
-            # Extract environment name from package name
-            # "openenv-coding_env" -> "coding_env"
-            env_name = package_name.replace("openenv-", "").replace("-", "_")
+            # Ensure package is installed (reuse AutoEnv logic, downloads only if needed)
+            env_name = AutoEnv._ensure_package_from_hub(name)
         else:
             env_name = name
 

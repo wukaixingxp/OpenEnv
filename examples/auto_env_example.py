@@ -165,34 +165,28 @@ def example_error_handling():
     print()
 
 
-def example_special_requirements():
+def example_hf_space():
     """Example 7: Environments with special requirements"""
-    print("=" * 70)
-    print("Example 7: Special Requirements")
-    print("=" * 70)
-    print()
+    env = AutoEnv.from_name("wukaixingxp/coding-env-test")
 
-    # DIPG environment requires dataset path
-    print("DIPG environment requires DIPG_DATASET_PATH:")
-    print()
-    print("  # This would show a warning:")
-    print("  # env = AutoEnv.from_name('dipg-env')")
-    print()
-    print("  # Correct usage:")
-    print("  env = AutoEnv.from_name(")
-    print("      'dipg-env',")
-    print("      env_vars={'DIPG_DATASET_PATH': '/data/dipg'}")
-    print("  )")
-    print()
+    # Reset environment
+    observation = env.reset()
+    print(f"Reset observation: {observation}")
 
-    # FinRL environment has optional config
-    print("FinRL environment accepts optional config:")
-    print()
-    print("  env = AutoEnv.from_name(")
-    print("      'finrl-env',")
-    print("      env_vars={'FINRL_CONFIG_PATH': '/config.json'}")
-    print("  )")
-    print()
+    # Get action class
+    CodeAction = AutoAction.from_name("wukaixingxp/coding-env-test")
+
+    # Create and execute action
+    action = CodeAction(code="print('Hello!')")
+    result = env.step(action)  # Returns StepResult object, not tuple
+
+    # Access result properties
+    print(f"Observation: {result.observation}")
+    print(f"Reward: {result.reward}")
+    print(f"Done: {result.done}")
+
+    # Clean up
+    env.close()
 
 
 def test_specific_environment(env_name: str):
@@ -285,7 +279,7 @@ def main():
         example_list_actions()
         example_environment_info()
         example_error_handling()
-        example_special_requirements()
+        example_hf_space()
 
     else:
         # Show usage info and examples that don't need Docker
@@ -305,7 +299,7 @@ def main():
         example_list_actions()
         example_environment_info()
         example_error_handling()
-        example_special_requirements()
+        example_hf_space()
 
         print()
         print("To test with actual Docker environments:")

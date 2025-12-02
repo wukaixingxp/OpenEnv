@@ -47,6 +47,9 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# Cache for repo ID → env_name mapping to avoid redundant downloads
+_hub_env_name_cache: Dict[str, str] = {}
+
 
 class AutoEnv:
     """
@@ -301,6 +304,7 @@ class AutoEnv:
         Ensure package from HuggingFace Hub is installed.
         
         Only downloads and installs if not already installed.
+        Uses a cache to avoid redundant downloads for the same repo ID.
         
         Args:
             name: HuggingFace repo ID (e.g., "wukaixingxp/coding-env-test")
@@ -308,6 +312,14 @@ class AutoEnv:
         Returns:
             Environment name (e.g., "coding_env")
         """
+        global _hub_env_name_cache
+        
+        # Check if we already resolved this repo ID
+        if name in _hub_env_name_cache:
+            env_name = _hub_env_name_cache[name]
+            logger.debug(f"✅ Using cached env name for {name}: {env_name}")
+            return env_name
+        
         # Download and get actual package name from pyproject.toml
         logger.info(f"📦 Checking package from HuggingFace Space...")
         package_name, env_path = cls._get_package_name_from_hub(name)
@@ -328,6 +340,10 @@ class AutoEnv:
         # Extract environment name from package name
         # "openenv-coding_env" -> "coding_env"
         env_name = package_name.replace("openenv-", "").replace("-", "_")
+        
+        # Cache the result to avoid redundant downloads
+        _hub_env_name_cache[name] = env_name
+        
         return env_name
 
     @classmethod

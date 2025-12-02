@@ -462,13 +462,14 @@ class AutoEnv:
         # Create client instance
         try:
             if base_url:
-                # Connect to existing server at URL
-                return client_class(base_url=base_url, **kwargs)
+                # Connect to existing server at URL (no container management needed)
+                # Explicitly pass provider=None to prevent any container stop attempts
+                return client_class(base_url=base_url, provider=None, **kwargs)
             else:
                 # Start new Docker container
                 return client_class.from_docker_image(
                     image=docker_image,
-                    container_provider=container_provider,
+                    provider=container_provider,  # Fixed: parameter name is 'provider' not 'container_provider'
                     wait_timeout=wait_timeout,
                     env_vars=env_vars or {},
                     **kwargs,

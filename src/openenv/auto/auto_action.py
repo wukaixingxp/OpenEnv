@@ -19,14 +19,14 @@ Example:
     >>> from openenv import AutoEnv, AutoAction
     >>>
     >>> # Get Action class from environment name
-    >>> CodeAction = AutoAction.from_name("coding")
+    >>> CodeAction = AutoAction.from_hub("coding")
     >>> action = CodeAction(code="print('Hello!')")
     >>>
     >>> # From HuggingFace Hub
-    >>> CodeAction = AutoAction.from_name("meta-pytorch/coding-env")
+    >>> CodeAction = AutoAction.from_hub("meta-pytorch/coding-env")
     >>>
     >>> # Use with AutoEnv
-    >>> env = AutoEnv.from_name("coding-env")
+    >>> env = AutoEnv.from_hub("coding-env")
     >>> result = env.step(action)
 """
 
@@ -54,33 +54,33 @@ class AutoAction:
 
     Example:
         >>> # From installed package
-        >>> CodeAction = AutoAction.from_name("coding")
+        >>> CodeAction = AutoAction.from_hub("coding")
         >>> action = CodeAction(code="print('test')")
         >>>
         >>> # From HuggingFace Hub
-        >>> CodeAction = AutoAction.from_name("meta-pytorch/coding-env")
+        >>> CodeAction = AutoAction.from_hub("meta-pytorch/coding-env")
         >>> action = CodeAction(code="print('test')")
         >>>
         >>> # Use with AutoEnv for a complete workflow
-        >>> env = AutoEnv.from_name("coding-env")
-        >>> ActionClass = AutoAction.from_name("coding-env")
+        >>> env = AutoEnv.from_hub("coding-env")
+        >>> ActionClass = AutoAction.from_hub("coding-env")
         >>> action = ActionClass(code="print('Hello, AutoAction!')")
         >>> result = env.step(action)
 
     Note:
         AutoAction is not meant to be instantiated directly. Use the class
-        method from_name() instead.
+        method from_hub() instead.
     """
 
     def __init__(self):
         """AutoAction should not be instantiated directly. Use class methods instead."""
         raise TypeError(
             "AutoAction is a factory class and should not be instantiated directly. "
-            "Use AutoAction.from_name() instead."
+            "Use AutoAction.from_hub() instead."
         )
 
     @classmethod
-    def from_name(cls, name: str) -> Type:
+    def from_hub(cls, name: str) -> Type:
         """
         Get the Action class from environment name or HuggingFace Hub repository.
 
@@ -106,17 +106,17 @@ class AutoAction:
 
         Examples:
             >>> # From installed package
-            >>> CodeAction = AutoAction.from_name("coding-env")
+            >>> CodeAction = AutoAction.from_hub("coding-env")
             >>> action = CodeAction(code="print('Hello!')")
             >>>
             >>> # From HuggingFace Hub
-            >>> CodeAction = AutoAction.from_name("meta-pytorch/coding-env")
+            >>> CodeAction = AutoAction.from_hub("meta-pytorch/coding-env")
             >>> action = CodeAction(code="print('Hello!')")
             >>>
             >>> # Different name formats
-            >>> EchoAction = AutoAction.from_name("echo")
-            >>> EchoAction = AutoAction.from_name("echo-env")
-            >>> EchoAction = AutoAction.from_name("echo_env")
+            >>> EchoAction = AutoAction.from_hub("echo")
+            >>> EchoAction = AutoAction.from_hub("echo-env")
+            >>> EchoAction = AutoAction.from_hub("echo_env")
         """
         # Check if it's a HuggingFace Hub URL or repo ID
         if _is_hub_url(name):
@@ -137,7 +137,7 @@ class AutoAction:
                 raise ValueError(
                     f"No OpenEnv environments found.\n"
                     f"Install an environment with: pip install openenv-<env-name>\n"
-                    f"Or specify a HuggingFace Hub repository: AutoAction.from_name('org/repo')"
+                    f"Or specify a HuggingFace Hub repository: AutoAction.from_hub('org/repo')"
                 )
 
             # Try to suggest similar environment names
@@ -170,7 +170,7 @@ class AutoAction:
         """
         Get the Action class from environment name.
 
-        This is an alias for from_name() for backward compatibility and clarity.
+        This is an alias for from_hub() for backward compatibility and clarity.
 
         Args:
             env_name: Environment name (e.g., "coding", "echo")
@@ -182,7 +182,7 @@ class AutoAction:
             >>> CodeAction = AutoAction.from_env("coding")
             >>> action = CodeAction(code="print('Hello!')")
         """
-        return cls.from_name(env_name)
+        return cls.from_hub(env_name)
 
     @classmethod
     def get_action_info(cls, name: str) -> Dict[str, Any]:

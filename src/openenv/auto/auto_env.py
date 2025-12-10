@@ -19,13 +19,13 @@ Example:
     >>> from openenv import AutoEnv, AutoAction
     >>>
     >>> # From installed package
-    >>> env = AutoEnv.from_name("coding-env")
+    >>> env = AutoEnv.from_hub("coding-env")
     >>>
     >>> # From HuggingFace Hub
-    >>> env = AutoEnv.from_name("meta-pytorch/coding-env")
+    >>> env = AutoEnv.from_hub("meta-pytorch/coding-env")
     >>>
     >>> # With configuration
-    >>> env = AutoEnv.from_name("coding", env_vars={"DEBUG": "1"})
+    >>> env = AutoEnv.from_hub("coding", env_vars={"DEBUG": "1"})
 """
 
 from __future__ import annotations
@@ -67,24 +67,24 @@ class AutoEnv:
 
     Example:
         >>> # From installed package
-        >>> env = AutoEnv.from_name("coding-env")
+        >>> env = AutoEnv.from_hub("coding-env")
         >>>
         >>> # From HuggingFace Hub
-        >>> env = AutoEnv.from_name("meta-pytorch/coding-env")
+        >>> env = AutoEnv.from_hub("meta-pytorch/coding-env")
         >>>
         >>> # List available environments
         >>> AutoEnv.list_environments()
 
     Note:
         AutoEnv is not meant to be instantiated directly. Use the class method
-        from_name() instead.
+        from_hub() instead.
     """
 
     def __init__(self):
         """AutoEnv should not be instantiated directly. Use class methods instead."""
         raise TypeError(
             "AutoEnv is a factory class and should not be instantiated directly. "
-            "Use AutoEnv.from_name() instead."
+            "Use AutoEnv.from_hub() instead."
         )
 
     @classmethod
@@ -347,7 +347,7 @@ class AutoEnv:
         return env_name
 
     @classmethod
-    def from_name(
+    def from_hub(
         cls,
         name: str,
         base_url: Optional[str] = None,
@@ -388,16 +388,16 @@ class AutoEnv:
 
         Examples:
             >>> # From installed package
-            >>> env = AutoEnv.from_name("coding-env")
+            >>> env = AutoEnv.from_hub("coding-env")
             >>>
             >>> # From HuggingFace Hub
-            >>> env = AutoEnv.from_name("meta-pytorch/coding-env")
+            >>> env = AutoEnv.from_hub("meta-pytorch/coding-env")
             >>>
             >>> # With custom Docker image
-            >>> env = AutoEnv.from_name("coding", docker_image="my-coding-env:v2")
+            >>> env = AutoEnv.from_hub("coding", docker_image="my-coding-env:v2")
             >>>
             >>> # With environment variables
-            >>> env = AutoEnv.from_name(
+            >>> env = AutoEnv.from_hub(
             ...     "dipg",
             ...     env_vars={"DIPG_DATASET_PATH": "/data/dipg"}
             ... )
@@ -444,7 +444,7 @@ class AutoEnv:
                 raise ValueError(
                     f"No OpenEnv environments found.\n"
                     f"Install an environment with: pip install openenv-<env-name>\n"
-                    f"Or specify a HuggingFace Hub repository: AutoEnv.from_name('org/repo')"
+                    f"Or specify a HuggingFace Hub repository: AutoEnv.from_hub('org/repo')"
                 )
 
             # Try to suggest similar environment names

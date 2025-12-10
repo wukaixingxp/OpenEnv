@@ -42,13 +42,13 @@ def example_basic_usage():
 
     # You can now do:
     print("Creating environment using AutoEnv...")
-    client = AutoEnv.from_name("coding-env")
+    client = AutoEnv.from_hub("coding-env")
     print("✓ Environment created!")
     print()
 
     # Get the Action class automatically
     print("Getting Action class using AutoAction...")
-    CodeAction = AutoAction.from_name("coding-env")
+    CodeAction = AutoAction.from_hub("coding-env")
     print(f"✓ Got Action class: {CodeAction.__name__}")
     print()
 
@@ -75,7 +75,7 @@ def example_alternative_syntax():
 
     # You can also use just the environment key
     print("Getting Action class by environment name...")
-    CodeAction = AutoAction.from_name("coding")
+    CodeAction = AutoAction.from_hub("coding")
     print(f"✓ Got Action class: {CodeAction.__name__}")
     print()
 
@@ -143,7 +143,7 @@ def example_error_handling():
     # Try an unknown environment
     print("Trying unknown environment 'nonexistent'...")
     try:
-        env = AutoEnv.from_name("nonexistent-env")
+        env = AutoEnv.from_hub("nonexistent-env")
     except ValueError as e:
         print(f"✓ Got expected error: {e}")
     print()
@@ -151,7 +151,7 @@ def example_error_handling():
     # Try a typo - should suggest similar names
     print("Trying typo 'cooding' (should suggest 'coding')...")
     try:
-        env = AutoEnv.from_name("cooding-env")
+        env = AutoEnv.from_hub("cooding-env")
     except ValueError as e:
         print(f"✓ Got helpful suggestion: {e}")
     print()
@@ -159,7 +159,7 @@ def example_error_handling():
     # Try deprecated julia environment
     print("Trying deprecated 'julia' environment...")
     try:
-        env = AutoEnv.from_name("julia-env")
+        env = AutoEnv.from_hub("julia-env")
     except ValueError as e:
         print(f"✓ Got deprecation notice: {e}")
     print()
@@ -167,14 +167,14 @@ def example_error_handling():
 
 def example_hf_space():
     """Example 7: Environments with special requirements"""
-    env = AutoEnv.from_name("wukaixingxp/coding-env-test")
+    env = AutoEnv.from_hub("wukaixingxp/coding-env-test")
 
     # Reset environment
     observation = env.reset()
     print(f"Reset observation: {observation}")
 
     # Get action class
-    CodeAction = AutoAction.from_name("wukaixingxp/coding-env-test")
+    CodeAction = AutoAction.from_hub("wukaixingxp/coding-env-test")
 
     # Create and execute action
     action = CodeAction(code="print('Hello!')")
@@ -208,11 +208,11 @@ def test_specific_environment(env_name: str):
         # Create environment with extended timeout for slow containers
         # Use the simplified name format
         env_image_name = f"{env_name}-env" if not env_name.endswith("-env") else env_name
-        env = AutoEnv.from_name(env_image_name, wait_timeout=60.0)
+        env = AutoEnv.from_hub(env_image_name, wait_timeout=60.0)
         print("✓ Environment created!")
 
         # Get action class
-        ActionClass = AutoAction.from_name(env_name)
+        ActionClass = AutoAction.from_hub(env_name)
         print(f"✓ Action class: {ActionClass.__name__}")
         print()
 

@@ -21,9 +21,9 @@ import pytest
 from unittest.mock import Mock, patch, MagicMock
 from typing import Type
 
-from envs.auto_env import AutoEnv
-from envs.auto_action import AutoAction
-from envs._discovery import (
+from openenv.auto.auto_env import AutoEnv
+from openenv.auto.auto_action import AutoAction
+from openenv.auto._discovery import (
     EnvironmentInfo,
     EnvironmentDiscovery,
     get_discovery,

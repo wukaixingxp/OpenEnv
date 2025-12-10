@@ -20,7 +20,7 @@ import pytest
 from unittest.mock import Mock, patch, MagicMock
 from pathlib import Path
 
-from envs._discovery import (
+from openenv.auto._discovery import (
     EnvironmentDiscovery,
     EnvironmentInfo,
     get_discovery,

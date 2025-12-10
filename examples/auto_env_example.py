@@ -26,7 +26,7 @@ import sys
 import argparse
 from pathlib import Path
 
-from envs import AutoEnv, AutoAction
+from openenv import AutoEnv, AutoAction
 
 
 def example_basic_usage():

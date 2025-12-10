@@ -16,7 +16,7 @@ This module simplifies environment creation by automatically detecting the
 environment type from the name and instantiating the appropriate client class.
 
 Example:
-    >>> from envs import AutoEnv, AutoAction
+    >>> from openenv import AutoEnv, AutoAction
     >>>
     >>> # From installed package
     >>> env = AutoEnv.from_name("coding-env")
@@ -42,8 +42,8 @@ from typing import Any, Optional, TYPE_CHECKING, Dict
 from ._discovery import get_discovery, _is_hub_url, _normalize_env_name
 
 if TYPE_CHECKING:
-    from core.containers.runtime import ContainerProvider
-    from core.http_env_client import HTTPEnvClient
+    from openenv.core.containers.runtime import ContainerProvider
+    from openenv.core.http_env_client import HTTPEnvClient
 
 logger = logging.getLogger(__name__)
 

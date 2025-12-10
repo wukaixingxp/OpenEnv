@@ -16,7 +16,7 @@ detecting and returning the appropriate Action class without requiring
 manual imports.
 
 Example:
-    >>> from envs import AutoEnv, AutoAction
+    >>> from openenv import AutoEnv, AutoAction
     >>>
     >>> # Get Action class from environment name
     >>> CodeAction = AutoAction.from_name("coding")

@@ -121,7 +121,7 @@ class TestAutoEnvGetEnvClass:
     def test_get_env_class_success(self, mock_discovery, mock_env_info):
         """Test getting environment class successfully."""
         # Mock the discovery
-        with patch('envs.auto_env.get_discovery', return_value=mock_discovery):
+        with patch('openenv.auto.auto_env.get_discovery', return_value=mock_discovery):
             # Mock the client class
             mock_client_class = Mock()
             mock_env_info.get_client_class = Mock(return_value=mock_client_class)
@@ -135,7 +135,7 @@ class TestAutoEnvGetEnvClass:
         """Test getting unknown environment raises ValueError."""
         mock_discovery.get_environment_by_name.return_value = None
         
-        with patch('envs.auto_env.get_discovery', return_value=mock_discovery):
+        with patch('openenv.auto.auto_env.get_discovery', return_value=mock_discovery):
             with pytest.raises(ValueError) as exc_info:
                 AutoEnv.get_env_class("nonexistent")
             
@@ -143,7 +143,7 @@ class TestAutoEnvGetEnvClass:
 
     def test_get_env_class_with_different_name_formats(self, mock_discovery, mock_env_info):
         """Test that different name formats resolve correctly."""
-        with patch('envs.auto_env.get_discovery', return_value=mock_discovery):
+        with patch('openenv.auto.auto_env.get_discovery', return_value=mock_discovery):
             mock_client_class = Mock()
             mock_env_info.get_client_class = Mock(return_value=mock_client_class)
             
@@ -159,7 +159,7 @@ class TestAutoEnvGetEnvInfo:
 
     def test_get_env_info_success(self, mock_discovery, mock_env_info):
         """Test getting environment info successfully."""
-        with patch('envs.auto_env.get_discovery', return_value=mock_discovery):
+        with patch('openenv.auto.auto_env.get_discovery', return_value=mock_discovery):
             mock_discovery.get_environment_by_name.return_value = mock_env_info
             
             info = AutoEnv.get_env_info("echo")
@@ -179,7 +179,7 @@ class TestAutoEnvGetEnvInfo:
         """Test getting info for unknown environment raises ValueError."""
         mock_discovery.get_environment_by_name.return_value = None
         
-        with patch('envs.auto_env.get_discovery', return_value=mock_discovery):
+        with patch('openenv.auto.auto_env.get_discovery', return_value=mock_discovery):
             with pytest.raises(ValueError) as exc_info:
                 AutoEnv.get_env_info("nonexistent")
             
@@ -191,7 +191,7 @@ class TestAutoEnvListEnvironments:
 
     def test_list_environments(self, mock_discovery, capsys):
         """Test listing environments prints formatted output."""
-        with patch('envs.auto_env.get_discovery', return_value=mock_discovery):
+        with patch('openenv.auto.auto_env.get_discovery', return_value=mock_discovery):
             AutoEnv.list_environments()
         
         captured = capsys.readouterr()
@@ -210,7 +210,7 @@ class TestAutoEnvFromName:
             "coding": Mock(),
         }
         
-        with patch('envs.auto_env.get_discovery', return_value=mock_discovery):
+        with patch('openenv.auto.auto_env.get_discovery', return_value=mock_discovery):
             with pytest.raises(ValueError) as exc_info:
                 AutoEnv.from_hub("ech")  # Close to "echo"
             
@@ -224,7 +224,7 @@ class TestAutoEnvFromName:
         mock_discovery.get_environment_by_name.return_value = None
         mock_discovery.discover.return_value = {}
         
-        with patch('envs.auto_env.get_discovery', return_value=mock_discovery):
+        with patch('openenv.auto.auto_env.get_discovery', return_value=mock_discovery):
             with pytest.raises(ValueError) as exc_info:
                 AutoEnv.from_hub("anyenv")
             
@@ -242,7 +242,7 @@ class TestAutoEnvFromName:
         mock_client_class.return_value = mock_client_instance
         mock_env_info.get_client_class = Mock(return_value=mock_client_class)
         
-        with patch('envs.auto_env.get_discovery', return_value=mock_discovery):
+        with patch('openenv.auto.auto_env.get_discovery', return_value=mock_discovery):
             result = AutoEnv.from_hub("echo", base_url="http://localhost:8000")
             
             assert result is mock_client_instance
@@ -288,7 +288,7 @@ class TestAutoActionFromName:
 
     def test_from_hub_success(self, mock_discovery, mock_env_info):
         """Test getting action class successfully."""
-        with patch('envs.auto_action.get_discovery', return_value=mock_discovery):
+        with patch('openenv.auto.auto_action.get_discovery', return_value=mock_discovery):
             mock_discovery.get_environment_by_name.return_value = mock_env_info
             
             # Mock the action class
@@ -305,7 +305,7 @@ class TestAutoActionFromName:
         mock_discovery.get_environment_by_name.return_value = None
         mock_discovery.discover.return_value = {}
         
-        with patch('envs.auto_action.get_discovery', return_value=mock_discovery):
+        with patch('openenv.auto.auto_action.get_discovery', return_value=mock_discovery):
             with pytest.raises(ValueError) as exc_info:
                 AutoAction.from_hub("nonexistent")
             
@@ -320,7 +320,7 @@ class TestAutoActionFromName:
             "coding": Mock(),
         }
         
-        with patch('envs.auto_action.get_discovery', return_value=mock_discovery):
+        with patch('openenv.auto.auto_action.get_discovery', return_value=mock_discovery):
             with pytest.raises(ValueError) as exc_info:
                 AutoAction.from_hub("ech")  # Close to "echo"
             
@@ -329,7 +329,7 @@ class TestAutoActionFromName:
 
     def test_from_hub_with_different_formats(self, mock_discovery, mock_env_info):
         """Test that different name formats work."""
-        with patch('envs.auto_action.get_discovery', return_value=mock_discovery):
+        with patch('openenv.auto.auto_action.get_discovery', return_value=mock_discovery):
             mock_action_class = Mock()
             mock_env_info.get_action_class = Mock(return_value=mock_action_class)
             
@@ -345,7 +345,7 @@ class TestAutoActionFromEnv:
 
     def test_from_env_is_alias(self, mock_discovery, mock_env_info):
         """Test that from_env is an alias for from_hub."""
-        with patch('envs.auto_action.get_discovery', return_value=mock_discovery):
+        with patch('openenv.auto.auto_action.get_discovery', return_value=mock_discovery):
             mock_discovery.get_environment_by_name.return_value = mock_env_info
             
             mock_action_class = Mock()
@@ -361,7 +361,7 @@ class TestAutoActionGetActionInfo:
 
     def test_get_action_info_success(self, mock_discovery, mock_env_info):
         """Test getting action info successfully."""
-        with patch('envs.auto_action.get_discovery', return_value=mock_discovery):
+        with patch('openenv.auto.auto_action.get_discovery', return_value=mock_discovery):
             mock_discovery.get_environment_by_name.return_value = mock_env_info
             
             info = AutoAction.get_action_info("echo")
@@ -375,7 +375,7 @@ class TestAutoActionGetActionInfo:
 
     def test_get_action_info_with_custom_names(self, mock_discovery, mock_coding_env_info):
         """Test getting action info with custom class names."""
-        with patch('envs.auto_action.get_discovery', return_value=mock_discovery):
+        with patch('openenv.auto.auto_action.get_discovery', return_value=mock_discovery):
             mock_discovery.get_environment_by_name.return_value = mock_coding_env_info
             
             info = AutoAction.get_action_info("coding")
@@ -387,7 +387,7 @@ class TestAutoActionGetActionInfo:
         """Test getting info for unknown environment raises ValueError."""
         mock_discovery.get_environment_by_name.return_value = None
         
-        with patch('envs.auto_action.get_discovery', return_value=mock_discovery):
+        with patch('openenv.auto.auto_action.get_discovery', return_value=mock_discovery):
             with pytest.raises(ValueError) as exc_info:
                 AutoAction.get_action_info("nonexistent")
             
@@ -404,7 +404,7 @@ class TestAutoActionListActions:
             "coding": mock_coding_env_info,
         }
         
-        with patch('envs.auto_action.get_discovery', return_value=mock_discovery):
+        with patch('openenv.auto.auto_action.get_discovery', return_value=mock_discovery):
             AutoAction.list_actions()
         
         captured = capsys.readouterr()
@@ -419,7 +419,7 @@ class TestAutoActionListActions:
         """Test listing when no environments are found."""
         mock_discovery.discover.return_value = {}
         
-        with patch('envs.auto_action.get_discovery', return_value=mock_discovery):
+        with patch('openenv.auto.auto_action.get_discovery', return_value=mock_discovery):
             AutoAction.list_actions()
         
         captured = capsys.readouterr()
@@ -488,8 +488,8 @@ class TestAutoEnvAutoActionIntegration:
 
     def test_same_env_resolves_consistently(self, mock_discovery, mock_env_info):
         """Test that AutoEnv and AutoAction resolve the same environment."""
-        with patch('envs.auto_env.get_discovery', return_value=mock_discovery), \
-             patch('envs.auto_action.get_discovery', return_value=mock_discovery):
+        with patch('openenv.auto.auto_env.get_discovery', return_value=mock_discovery), \
+             patch('openenv.auto.auto_action.get_discovery', return_value=mock_discovery):
             
             mock_discovery.get_environment_by_name.return_value = mock_env_info
             
@@ -508,8 +508,8 @@ class TestAutoEnvAutoActionIntegration:
 
     def test_env_info_matches_action_info(self, mock_discovery, mock_env_info):
         """Test that env info and action info are consistent."""
-        with patch('envs.auto_env.get_discovery', return_value=mock_discovery), \
-             patch('envs.auto_action.get_discovery', return_value=mock_discovery):
+        with patch('openenv.auto.auto_env.get_discovery', return_value=mock_discovery), \
+             patch('openenv.auto.auto_action.get_discovery', return_value=mock_discovery):
             
             mock_discovery.get_environment_by_name.return_value = mock_env_info
             
@@ -535,7 +535,7 @@ class TestErrorHandling:
         mock_discovery.get_environment_by_name.return_value = mock_env_info
         mock_env_info.get_client_class = Mock(side_effect=ImportError("Module not found"))
         
-        with patch('envs.auto_env.get_discovery', return_value=mock_discovery):
+        with patch('openenv.auto.auto_env.get_discovery', return_value=mock_discovery):
             with pytest.raises(ImportError) as exc_info:
                 AutoEnv.from_hub("echo", base_url="http://localhost:8000")
             
@@ -548,7 +548,7 @@ class TestErrorHandling:
         mock_discovery.get_environment_by_name.return_value = mock_env_info
         mock_env_info.get_action_class = Mock(side_effect=ImportError("Module not found"))
         
-        with patch('envs.auto_action.get_discovery', return_value=mock_discovery):
+        with patch('openenv.auto.auto_action.get_discovery', return_value=mock_discovery):
             with pytest.raises(ImportError) as exc_info:
                 AutoAction.from_hub("echo")
             

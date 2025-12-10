@@ -111,7 +111,7 @@ class TestHelperFunctions:
 class TestCreateEnvInfoFromPackage:
     """Test creating EnvironmentInfo from package data."""
 
-    @patch('envs._discovery._load_manifest_from_package')
+    @patch('openenv.auto._discovery._load_manifest_from_package')
     def test_create_env_info_with_manifest(self, mock_load_manifest):
         """Test creating env info when manifest exists."""
         # Mock manifest data
@@ -136,7 +136,7 @@ class TestCreateEnvInfoFromPackage:
         assert env_info.client_class_name == "EchoEnv"
         assert env_info.action_class_name == "EchoAction"
 
-    @patch('envs._discovery._load_manifest_from_package')
+    @patch('openenv.auto._discovery._load_manifest_from_package')
     def test_create_env_info_with_custom_class_names(self, mock_load_manifest):
         """Test creating env info with custom class names from manifest."""
         # Mock manifest with custom class names
@@ -157,7 +157,7 @@ class TestCreateEnvInfoFromPackage:
         assert env_info.action_class_name == "CodeAction"
         assert env_info.observation_class_name == "CodeObservation"
 
-    @patch('envs._discovery._load_manifest_from_package')
+    @patch('openenv.auto._discovery._load_manifest_from_package')
     def test_create_env_info_without_manifest(self, mock_load_manifest):
         """Test creating env info when no manifest exists (uses conventions)."""
         mock_load_manifest.return_value = None
@@ -179,7 +179,7 @@ class TestEnvironmentDiscovery:
     """Test EnvironmentDiscovery class."""
 
     @patch('importlib.metadata.distributions')
-    @patch('envs._discovery._create_env_info_from_package')
+    @patch('openenv.auto._discovery._create_env_info_from_package')
     def test_discover_installed_packages(self, mock_create_info, mock_distributions):
         """Test discovering installed packages."""
         # Mock distribution objects

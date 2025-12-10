@@ -76,3 +76,13 @@ exclude_lines = [
     "if __name__ == .__main__.:",
     "if TYPE_CHECKING:",
 ]
+
+[tool.pytest.ini_options]
+markers = [
+    "integration: mark test as integration test (may require external resources)",
+    "network: mark test as requiring network access (HuggingFace Spaces, etc.)",
+    "docker: mark test as requiring Docker to be installed and running",
+]
+filterwarnings = [
+    "ignore::DeprecationWarning",
+]

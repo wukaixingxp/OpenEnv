@@ -83,8 +83,11 @@ class JuliaCodeActEnv(Environment):
         if not isinstance(action, JuliaAction):
             raise ValueError(f"Expected JuliaAction, got {type(action)}")
 
-        # Single execution: Run core_code + test_code together
-        combined_code = action.core_code + "\n\n" + action.test_code
+        # Single execution: Run core_code + test_code together (if test_code provided)
+        if action.test_code:
+            combined_code = action.core_code + "\n\n" + action.test_code
+        else:
+            combined_code = action.core_code
         full_result = self._executor.run(combined_code)
 
         # Parse test results from execution output
@@ -130,7 +133,10 @@ class JuliaCodeActEnv(Environment):
             stderr=full_result.stderr,
             exit_code=full_result.exit_code,
             reward=reward,
-            metadata={"core_code": action.core_code, "test_code": action.test_code},
+            metadata={
+                "core_code": action.core_code,
+                "test_code": action.test_code or "",
+            },
             tests_passed=tests_passed,
             tests_failed=tests_failed,
             code_compiles=code_compiles,

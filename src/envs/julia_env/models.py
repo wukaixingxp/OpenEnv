@@ -21,13 +21,13 @@ from core.env_server.types import Action, Observation, State
 class JuliaAction(Action):
     """
     Action for the Julia environment - code to execute.
-    
+
     Attributes:
         core_code: Core Julia code to execute
-        test_code: Test code to execute
+        test_code: Optional test code to execute. If not provided, only core_code runs.
     """
     core_code: str
-    test_code: str
+    test_code: Optional[str] = None
 
 @dataclass(kw_only=True)
 class JuliaObservation(Observation):

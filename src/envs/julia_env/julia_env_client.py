@@ -38,14 +38,17 @@ class JuliaEnv(HTTPEnvClient[JuliaAction, JuliaObservation]):
         >>> print(result.observation.stdout)
         >>>
         >>> # Execute Julia code
-        >>> action = JuliaAction(code='''
-        ... function multiply(a, b)
-        ...     return a * b
-        ... end
-        ...
-        ... using Test
-        ... @test multiply(3, 4) == 12
-        ... ''')
+        >>> action = JuliaAction(
+        ...     core_code='''
+        ...     function multiply(a, b)
+        ...         return a * b
+        ...     end
+        ...     ''',
+        ...     test_code='''
+        ...     using Test
+        ...     @test multiply(3, 4) == 12
+        ...     '''
+        ... )
         >>> result = client.step(action)
         >>> print(result.observation.tests_passed)  # 1
         >>> print(result.reward)
@@ -54,7 +57,7 @@ class JuliaEnv(HTTPEnvClient[JuliaAction, JuliaObservation]):
         >>> # Automatically start container and connect
         >>> client = JuliaEnv.from_docker_image("julia-env:latest")
         >>> result = client.reset()
-        >>> result = client.step(JuliaAction(code="println(2 + 2)"))
+        >>> result = client.step(JuliaAction(core_code="println(2 + 2)", test_code=""))
         >>> print(result.observation.stdout)  # "4\n"
         >>> client.close()
     """

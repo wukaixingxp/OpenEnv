@@ -234,14 +234,16 @@ env = JuliaEnv(base_url="http://localhost:8000")
 result = env.reset()
 
 # Execute Julia code with tests
-code = """
+core_code = """
 function fibonacci(n)
     if n <= 1
         return n
     end
     return fibonacci(n-1) + fibonacci(n-2)
 end
+"""
 
+test_code = """
 using Test
 @test fibonacci(0) == 0
 @test fibonacci(1) == 1
@@ -249,7 +251,7 @@ using Test
 @test fibonacci(10) == 55
 """
 
-result = env.step(JuliaAction(code=code))
+result = env.step(JuliaAction(core_code=core_code, test_code=test_code))
 
 print(f"Exit code: {result.observation.exit_code}")
 print(f"Tests passed: {result.observation.tests_passed}")
@@ -279,10 +281,11 @@ async def play_julia_game(game_idx, game_id, server_url, policy, tokenizer):
     # Generate code with LLM
     prompt = format_julia_prompt(task)
     responses = await policy.generate.route(prompt)
-    code = extract_julia_code(responses[0].text)
+    core_code = extract_julia_code(responses[0].text)
+    test_code = extract_test_code(responses[0].text)
 
     # Execute in environment
-    result = env.step(JuliaAction(code=code))
+    result = env.step(JuliaAction(core_code=core_code, test_code=test_code))
 
     # Get reward
     reward = result.observation.reward

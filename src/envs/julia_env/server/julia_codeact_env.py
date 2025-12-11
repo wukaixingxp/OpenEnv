@@ -19,14 +19,14 @@ class JuliaCodeActEnv(Environment):
     """
     Julia Code Action Environment for executing code and tracking state.
 
-    This environment executes Julia code submitted as CodeAction during step,
+    This environment executes Julia code submitted as JuliaAction during step,
     maintains the last exit code in its state, and returns results wrapped
-    in CodeObservation.
+    in JuliaObservation.
 
     Example:
         >>> env = JuliaCodeActEnv()
         >>> obs = env.reset()
-        >>> action = CodeAction(code='println("Hello, Julia!")')
+        >>> action = JuliaAction(core_code='println("Hello, Julia!")', test_code='')
         >>> obs = env.step(action)
         >>> print(obs.stdout)  # "Hello, Julia!\n"
         >>> print(obs.exit_code)  # 0

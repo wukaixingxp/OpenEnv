@@ -19,13 +19,13 @@ Example:
     >>> from openenv import AutoEnv, AutoAction
     >>>
     >>> # From installed package
-    >>> env = AutoEnv.from_hub("coding-env")
+    >>> env = AutoEnv.from_env("coding-env")
     >>>
     >>> # From HuggingFace Hub
-    >>> env = AutoEnv.from_hub("meta-pytorch/coding-env")
+    >>> env = AutoEnv.from_env("meta-pytorch/coding-env")
     >>>
     >>> # With configuration
-    >>> env = AutoEnv.from_hub("coding", env_vars={"DEBUG": "1"})
+    >>> env = AutoEnv.from_env("coding", env_vars={"DEBUG": "1"})
 """
 
 from __future__ import annotations
@@ -67,24 +67,24 @@ class AutoEnv:
 
     Example:
         >>> # From installed package
-        >>> env = AutoEnv.from_hub("coding-env")
+        >>> env = AutoEnv.from_env("coding-env")
         >>>
         >>> # From HuggingFace Hub
-        >>> env = AutoEnv.from_hub("meta-pytorch/coding-env")
+        >>> env = AutoEnv.from_env("meta-pytorch/coding-env")
         >>>
         >>> # List available environments
         >>> AutoEnv.list_environments()
 
     Note:
         AutoEnv is not meant to be instantiated directly. Use the class method
-        from_hub() instead.
+        from_env() instead.
     """
 
     def __init__(self):
         """AutoEnv should not be instantiated directly. Use class methods instead."""
         raise TypeError(
             "AutoEnv is a factory class and should not be instantiated directly. "
-            "Use AutoEnv.from_hub() instead."
+            "Use AutoEnv.from_env() instead."
         )
 
     @classmethod
@@ -142,6 +142,133 @@ class AutoEnv:
         except (requests.RequestException, Exception) as e:
             logger.debug(f"Space {space_url} not accessible: {e}")
             return False
+
+    @classmethod
+    def _check_server_availability(cls, base_url: str, timeout: float = 2.0) -> bool:
+        """
+        Check if a server is running and accessible at the given URL.
+
+        Args:
+            base_url: URL to check (e.g., "http://localhost:8000")
+            timeout: Request timeout in seconds
+
+        Returns:
+            True if server is accessible, False otherwise
+
+        Examples:
+            >>> AutoEnv._check_server_availability("http://localhost:8000")
+            True
+        """
+        try:
+            # Try to access the health endpoint
+            response = requests.get(f"{base_url.rstrip('/')}/health", timeout=timeout)
+            if response.status_code == 200:
+                return True
+
+            # If health endpoint doesn't exist, try root endpoint
+            response = requests.get(base_url, timeout=timeout)
+            return response.status_code == 200
+        except (requests.RequestException, Exception) as e:
+            logger.debug(f"Server at {base_url} not accessible: {e}")
+            return False
+
+    @classmethod
+    def _wait_for_server_ready(
+        cls,
+        base_url: str,
+        timeout: float = 30.0,
+        check_interval: float = 0.5,
+    ) -> None:
+        """
+        Wait for server to become ready at the given URL.
+
+        Args:
+            base_url: URL to check (e.g., "http://localhost:8000")
+            timeout: Maximum time to wait in seconds
+            check_interval: Time between checks in seconds
+
+        Raises:
+            TimeoutError: If server doesn't become ready within timeout
+        """
+        import time
+
+        start_time = time.time()
+        logger.info(f"⏳ Waiting for server at {base_url} to be ready...")
+
+        while time.time() - start_time < timeout:
+            if cls._check_server_availability(base_url, timeout=2.0):
+                elapsed = time.time() - start_time
+                logger.info(f"✅ Server ready at {base_url} (took {elapsed:.1f}s)")
+                return
+
+            time.sleep(check_interval)
+
+        raise TimeoutError(
+            f"Server at {base_url} did not become ready within {timeout}s"
+        )
+
+    @classmethod
+    def _start_docker_container(
+        cls,
+        docker_image: str,
+        target_url: str,
+        container_provider: Optional[ContainerProvider] = None,
+        env_vars: Optional[Dict[str, str]] = None,
+        wait_timeout: float = 30.0,
+    ) -> Dict[str, Any]:
+        """
+        Start a Docker container for the environment.
+
+        Args:
+            docker_image: Docker image to run
+            target_url: Target URL (e.g., "http://localhost:8000")
+            container_provider: Optional provider (creates LocalDockerProvider if None)
+            env_vars: Environment variables for container
+            wait_timeout: Timeout for container startup
+
+        Returns:
+            Dict with 'provider', 'base_url' keys
+
+        Raises:
+            RuntimeError: If Docker container fails to start
+        """
+        from urllib.parse import urlparse
+
+        # Parse target URL to get port
+        parsed = urlparse(target_url)
+        port = parsed.port or 8000
+
+        # Create or use provider
+        if container_provider is None:
+            # Lazy import to avoid circular dependencies
+            from openenv.core.containers.runtime.providers import LocalDockerProvider
+            container_provider = LocalDockerProvider()
+
+        # Start container
+        logger.info(f"🐳 Starting Docker container: {docker_image}")
+        logger.info(f"   Port: {port}")
+
+        try:
+            # Start container with specific port
+            # provider.start_container returns the base_url
+            base_url = container_provider.start_container(
+                image=docker_image,
+                port=port,
+                env_vars=env_vars or {},
+            )
+
+            # Wait for container to be ready
+            container_provider.wait_for_ready(base_url, timeout_s=wait_timeout)
+
+            logger.info(f"✅ Container ready at {base_url}")
+
+            return {
+                "provider": container_provider,
+                "base_url": base_url,
+            }
+        except Exception as e:
+            logger.error(f"Failed to start Docker container: {e}")
+            raise RuntimeError(f"Failed to start Docker container: {e}") from e
 
     @classmethod
     def _download_from_hub(
@@ -347,14 +474,15 @@ class AutoEnv:
         return env_name
 
     @classmethod
-    def from_hub(
+    def from_env(
         cls,
         name: str,
-        base_url: Optional[str] = None,
+        base_url: Optional[str] = "http://localhost:8000",
         docker_image: Optional[str] = None,
         container_provider: Optional[ContainerProvider] = None,
         wait_timeout: float = 30.0,
         env_vars: Optional[Dict[str, str]] = None,
+        auto_start_docker: bool = True,
         **kwargs: Any,
     ) -> HTTPEnvClient:
         """
@@ -365,6 +493,7 @@ class AutoEnv:
         2. If Hub: downloads and installs the environment package
         3. If local: looks up the installed openenv-* package
         4. Imports the client class and instantiates it
+        5. Smart fallback: Tries base_url first, then auto-starts Docker if needed
 
         Args:
             name: Environment name or HuggingFace Hub repo ID
@@ -372,11 +501,19 @@ class AutoEnv:
                   - "coding" / "coding-env" / "coding_env"
                   - "meta-pytorch/coding-env" (Hub repo ID)
                   - "https://huggingface.co/meta-pytorch/coding-env" (Hub URL)
-            base_url: Optional base URL for HTTP connection
-            docker_image: Optional Docker image name (overrides default)
-            container_provider: Optional container provider
-            wait_timeout: Timeout for container startup (seconds)
-            env_vars: Optional environment variables for the container
+            base_url: Base URL for HTTP connection. Defaults to "http://localhost:8000".
+                     Set to None to skip connection attempt and use Docker directly.
+                     With auto_start_docker=True: tries connection first, starts Docker if fails.
+            docker_image: Optional Docker image name (overrides default).
+                         Used for Docker fallback or when base_url=None.
+            container_provider: Optional container provider.
+                               Used for Docker fallback or when base_url=None.
+            wait_timeout: Timeout for container startup (seconds).
+                         Used for Docker fallback or when base_url=None.
+            env_vars: Optional environment variables for the container.
+                     Used for Docker fallback or when base_url=None.
+            auto_start_docker: Enable Docker fallback if server not running (default: True).
+                              Set to False to fail fast without Docker attempt.
             **kwargs: Additional arguments passed to the client class
 
         Returns:
@@ -387,17 +524,23 @@ class AutoEnv:
             ImportError: If environment package is not installed
 
         Examples:
-            >>> # From installed package
-            >>> env = AutoEnv.from_hub("coding-env")
+            >>> # Default: tries localhost:8000, falls back to Docker if not running
+            >>> env = AutoEnv.from_env("coding")
             >>>
-            >>> # From HuggingFace Hub
-            >>> env = AutoEnv.from_hub("meta-pytorch/coding-env")
+            >>> # Custom base URL with Docker fallback
+            >>> env = AutoEnv.from_env("coding", base_url="http://localhost:8001")
             >>>
-            >>> # With custom Docker image
-            >>> env = AutoEnv.from_hub("coding", docker_image="my-coding-env:v2")
+            >>> # From HuggingFace Hub (auto-detects Space URL)
+            >>> env = AutoEnv.from_env("wukaixingxp/coding-env-test")
+            >>>
+            >>> # Disable Docker fallback (fail fast if server not running)
+            >>> env = AutoEnv.from_env("coding", auto_start_docker=False)
+            >>>
+            >>> # Skip connection attempt, use Docker directly
+            >>> env = AutoEnv.from_env("coding", base_url=None)
             >>>
             >>> # With environment variables
-            >>> env = AutoEnv.from_hub(
+            >>> env = AutoEnv.from_env(
             ...     "dipg",
             ...     env_vars={"DIPG_DATASET_PATH": "/data/dipg"}
             ... )
@@ -407,17 +550,18 @@ class AutoEnv:
             # Try to connect to Space directly first
             space_url = cls._resolve_space_url(name)
             logger.info(f"Checking if HuggingFace Space is accessible: {space_url}")
-            
+
             space_is_available = cls._check_space_availability(space_url)
-            
-            if space_is_available and base_url is None:
+
+            # Only use Space URL if user didn't explicitly provide a different base_url
+            if space_is_available and base_url == "http://localhost:8000":
                 # Space is accessible! We'll connect directly without Docker
                 logger.info(f"✅ Space is accessible at: {space_url}")
                 logger.info("📦 Installing package for client code (no Docker needed)...")
-                
+
                 # Ensure package is installed (downloads only if needed)
                 env_name = cls._ensure_package_from_hub(name)
-                
+
                 # Set base_url to connect to remote Space
                 base_url = space_url
                 logger.info(f"🚀 Will connect to remote Space (no local Docker)")
@@ -425,8 +569,11 @@ class AutoEnv:
                 # Space not accessible or user provided explicit base_url
                 if not space_is_available:
                     logger.info(f"❌ Space not accessible at {space_url}")
-                    logger.info("📦 Falling back to local Docker mode...")
-                
+                    if base_url == "http://localhost:8000":
+                        logger.info("📦 Falling back to localhost:8000...")
+                    else:
+                        logger.info(f"📦 Will use provided base_url: {base_url}")
+
                 # Ensure package is installed (downloads only if needed)
                 env_name = cls._ensure_package_from_hub(name)
         else:
@@ -444,7 +591,7 @@ class AutoEnv:
                 raise ValueError(
                     f"No OpenEnv environments found.\n"
                     f"Install an environment with: pip install openenv-<env-name>\n"
-                    f"Or specify a HuggingFace Hub repository: AutoEnv.from_hub('org/repo')"
+                    f"Or specify a HuggingFace Hub repository: AutoEnv.from_env('org/repo')"
                 )
 
             # Try to suggest similar environment names
@@ -475,28 +622,120 @@ class AutoEnv:
         if docker_image is None:
             docker_image = env_info.default_image
 
-        # Create client instance
+        # Create client instance with smart fallback
         try:
             if base_url:
-                # Connect to existing server at URL (no container management needed)
-                # Explicitly pass provider=None to prevent any container stop attempts
-                return client_class(base_url=base_url, provider=None, **kwargs)
+                # Smart fallback: try connection first, then Docker if needed
+
+                # Step 1: Check if server is already running
+                server_running = cls._check_server_availability(base_url, timeout=2.0)
+
+                if server_running:
+                    # Server is running - connect directly
+                    logger.info(f"✅ Connecting to running server at {base_url}")
+                    return client_class(base_url=base_url, provider=None, **kwargs)
+
+                # Step 2: Server not running
+                logger.info(f"⚠️  Server not running at {base_url}")
+
+                if not auto_start_docker:
+                    # User disabled Docker fallback - fail fast
+                    raise ConnectionError(
+                        f"Server not running at {base_url} and auto_start_docker=False.\n"
+                        f"\n"
+                        f"Solutions:\n"
+                        f"1. Start the server manually:\n"
+                        f"   cd /path/to/OpenEnv\n"
+                        f"   python -m envs.{env_name}.server.app\n"
+                        f"\n"
+                        f"2. Enable Docker fallback: auto_start_docker=True (default)\n"
+                        f"3. Use explicit Docker mode: base_url=None"
+                    )
+
+                # Step 3: Attempt Docker auto-start fallback
+                logger.info(f"🐳 Attempting Docker auto-start: {docker_image}")
+
+                try:
+                    # Start Docker container
+                    container_info = cls._start_docker_container(
+                        docker_image=docker_image,
+                        target_url=base_url,
+                        container_provider=container_provider,
+                        env_vars=env_vars,
+                        wait_timeout=wait_timeout,
+                    )
+
+                    # Connect to now-running container
+                    # Use the actual base_url from the container (might differ from requested)
+                    actual_base_url = container_info["base_url"]
+                    logger.info(f"✅ Docker container started and ready at {actual_base_url}")
+                    return client_class(
+                        base_url=actual_base_url,
+                        provider=container_info["provider"],
+                        **kwargs
+                    )
+
+                except Exception as docker_error:
+                    # Docker auto-start failed
+                    raise ValueError(
+                        f"Failed to start environment for '{env_name}'.\n"
+                        f"Server not running at {base_url} and Docker auto-start failed.\n"
+                        f"Docker error: {docker_error}\n"
+                        f"\n"
+                        f"Solutions:\n"
+                        f"1. Start the server manually:\n"
+                        f"   cd /path/to/OpenEnv\n"
+                        f"   export PYTHONPATH=\"${{PWD}}/src:${{PYTHONPATH}}\"\n"
+                        f"   python -m envs.{env_name}.server.app\n"
+                        f"\n"
+                        f"2. Fix Docker/Podman configuration\n"
+                        f"3. Check if port {base_url.split(':')[-1] if ':' in base_url else '8000'} is available"
+                    ) from docker_error
+
             else:
-                # Start new Docker container
+                # Explicit None - use Docker mode directly (no connection attempt)
+                logger.info(f"🐳 Starting Docker container (base_url=None)")
                 return client_class.from_docker_image(
                     image=docker_image,
-                    provider=container_provider,  # Fixed: parameter name is 'provider' not 'container_provider'
+                    provider=container_provider,
                     wait_timeout=wait_timeout,
                     env_vars=env_vars or {},
                     **kwargs,
                 )
+
         except Exception as e:
+            # Final catch-all for unexpected errors
+            if isinstance(e, (ValueError, ConnectionError)):
+                # Re-raise our own errors
+                raise
             raise ValueError(
                 f"Failed to create environment client for '{env_name}'.\n"
                 f"Client class: {client_class.__name__}\n"
                 f"Docker image: {docker_image}\n"
                 f"Error: {e}"
             ) from e
+
+    @classmethod
+    def from_name(cls, *args, **kwargs) -> HTTPEnvClient:
+        """
+        Alias for from_env() for backwards compatibility.
+
+        This method is deprecated. Use from_env() instead.
+
+        Examples:
+            >>> # Old way (still works)
+            >>> env = AutoEnv.from_name("coding-env")
+            >>>
+            >>> # New way (recommended)
+            >>> env = AutoEnv.from_env("coding-env")
+        """
+        import warnings
+        warnings.warn(
+            "from_name() is deprecated. Use from_env() instead.",
+            DeprecationWarning,
+            stacklevel=2
+        )
+        return cls.from_env(*args, **kwargs)
 
     @classmethod
     def get_env_class(cls, name: str):

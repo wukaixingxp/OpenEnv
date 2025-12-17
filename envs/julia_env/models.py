@@ -1,7 +1,7 @@
 """
-envs/coding_env/models.py
+envs/julia_env/models.py
 --------------------------------
-Action/Observation types for the Coding environment.
+Action/Observation types for the Julia environment.
 """
 
 from __future__ import annotations
@@ -11,21 +11,21 @@ from typing import Any, Optional
 from openenv.core.env_server import Action, Observation, State
 
 
-class CodeAction(Action):
+class JuliaAction(Action):
     """
-    Represents a single code execution request with optional tests.
+    Represents a single Julia code execution request with tests.
 
     Attributes:
-        code: Main code to execute
-        test_code: Optional test code to execute (e.g., assertions/unit tests)
+        core_code: Main Julia code to execute (e.g., function definition)
+        test_code: Test code to execute (e.g., unit tests)
     """
-    code: str
+    core_code: str
     test_code: str = ""
 
 
-class CodeObservation(Observation):
+class JuliaObservation(Observation):
     """
-    Result of executing code in the environment.
+    Result of executing Julia code in the environment.
 
     Attributes:
         stdout: Standard output from code execution
@@ -45,8 +45,8 @@ class CodeObservation(Observation):
     reward: float = 0.0
 
 
-class CodeState(State):
-    """State for CodeAct environment with persistent execution context."""
+class JuliaState(State):
+    """State for Julia environment with persistent execution context."""
     last_exit_code: int = 0
     last_code_compiles: bool = True
     total_tests_passed: int = 0

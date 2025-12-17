@@ -1,8 +1,8 @@
 ---
 title: Coding Environment Server
 emoji: 💻
-colorFrom: blue
-colorTo: blue
+colorFrom: '#007ACC'
+colorTo: '#1E1E1E'
 sdk: docker
 pinned: false
 app_port: 8000
@@ -107,7 +107,7 @@ Note: When connecting to an existing server, `coding_env.close()` will NOT stop 
 Run the complete example that demonstrates the full workflow:
 
 ```bash
-python3 envs/coding_env/client/example_usage.py
+python3 examples/local_coding_env.py
 ```
 
 This example shows:

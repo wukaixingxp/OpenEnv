@@ -356,7 +356,10 @@ class EnvironmentDiscovery:
 
         # Filter for openenv-* packages (exclude openenv-core)
         for dist in distributions:
-            package_name = dist.metadata["Name"]
+            package_name = dist.metadata.get("Name")
+
+            if not package_name:
+                continue
 
             if not package_name.startswith("openenv-"):
                 continue

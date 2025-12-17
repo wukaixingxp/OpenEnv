@@ -1,0 +1,5 @@
+name: julia_env
+version: "0.1.0"
+description: "Julia code execution environment for OpenEnv"
+action: JuliaAction
+observation: JuliaObservation

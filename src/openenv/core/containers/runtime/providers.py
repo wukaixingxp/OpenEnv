@@ -107,17 +107,22 @@ class LocalDockerProvider(ContainerProvider):
         """Initialize the local Docker provider."""
         self._container_id: Optional[str] = None
         self._container_name: Optional[str] = None
+        self._is_podman: bool = False
 
-        # Check if Docker is available
+        # Check if Docker is available and detect if it's Podman
         import subprocess
 
         try:
-            subprocess.run(
+            result = subprocess.run(
                 ["docker", "version"],
                 check=True,
                 capture_output=True,
                 timeout=5,
+                text=True,
             )
+            # Check if this is Podman emulating Docker
+            if "podman" in result.stdout.lower() or "podman" in result.stderr.lower():
+                self._is_podman = True
         except (subprocess.CalledProcessError, FileNotFoundError, subprocess.TimeoutExpired):
             raise RuntimeError(
                 "Docker is not available. Please install Docker Desktop or Docker Engine."
@@ -157,8 +162,14 @@ class LocalDockerProvider(ContainerProvider):
             "docker", "run",
             "-d",  # Detached
             "--name", self._container_name,
-            "-p", f"{port}:8000",  # Map port
         ]
+
+        # Use host networking for Podman to avoid pasta networking issues
+        # For Docker, use port mapping as usual
+        if self._is_podman:
+            cmd.extend(["--network", "host"])
+        else:
+            cmd.extend(["-p", f"{port}:8000"])  # Map port for Docker
 
         # Add environment variables
         if env_vars:

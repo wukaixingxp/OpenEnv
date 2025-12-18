@@ -18,6 +18,7 @@ RUN pip install --no-cache-dir -r /tmp/requirements.txt && rm /tmp/requirements.
 COPY src/__init__.py /app/src/
 COPY src/openenv/__init__.py /app/src/openenv/
 COPY src/openenv/core/ /app/src/openenv/core/
+COPY src/openenv/auto/ /app/src/openenv/auto/
 COPY envs/coding_env/ /app/envs/coding_env/
 
 # Copy README for web interface documentation

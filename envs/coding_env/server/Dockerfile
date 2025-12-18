@@ -29,4 +29,5 @@ HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
     CMD curl -f http://localhost:${PORT}/health || exit 1
 
 # Run the FastAPI server (uses PORT env variable)
-CMD sh -c "uvicorn envs.coding_env.server.app:app --host 0.0.0.0 --port ${PORT}"
+# Using exec to ensure proper signal handling and log output
+CMD sh -c "echo '[coding_env] Starting server on port ${PORT}...' && exec uvicorn envs.coding_env.server.app:app --host 0.0.0.0 --port ${PORT} --log-level info"

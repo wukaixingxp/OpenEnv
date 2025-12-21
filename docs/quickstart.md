@@ -36,12 +36,12 @@ client.close()  # Stops and removes container
 
 ### Using environments from Hugging Face
 
-You can also use environments from Hugging Face. To do this, you can use the `from_hub` method of the environment class.
+You can also use environments from Hugging Face. To do this, you can use the `from_env` method of the environment class.
 
 ```python
 from envs.echo_env import EchoEnv
 
-client = EchoEnv.from_hub("meta-pytorch/echo-env")
+client = EchoEnv.from_env("meta-pytorch/echo-env")
 ```
 
 In the background, the environment will be pulled from Hugging Face and a container will be started on your local machine. 

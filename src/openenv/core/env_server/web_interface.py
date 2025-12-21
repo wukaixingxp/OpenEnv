@@ -38,20 +38,30 @@ def load_environment_metadata(
     Load environment metadata including README content.
 
     Args:
-        env: The environment instance
+        env: The environment instance or class (factory)
         env_name: Optional environment name for README file lookup
 
     Returns:
         EnvironmentMetadata with loaded information
     """
+    # Check if env is a class (factory) or an instance
+    is_class = isinstance(env, type)
+
     # Try to get metadata from environment if it has a method for it
-    if hasattr(env, "get_metadata"):
+    # Only call get_metadata on instances, not classes
+    if not is_class and hasattr(env, "get_metadata"):
         return env.get_metadata()
+
+    # Get the class name for default metadata
+    if is_class:
+        class_name = env.__name__
+    else:
+        class_name = env.__class__.__name__
 
     # Default metadata
     metadata = EnvironmentMetadata(
-        name=env_name or env.__class__.__name__,
-        description=f"{env.__class__.__name__} environment",
+        name=env_name or class_name,
+        description=f"{class_name} environment",
         version="1.0.0",
     )
 
@@ -279,6 +289,8 @@ def create_web_interface_app(
     action_cls: Type[Action],
     observation_cls: Type[Observation],
     env_name: Optional[str] = None,
+    max_concurrent_envs: Optional[int] = None,
+    concurrency_config: Optional["ConcurrencyConfig"] = None,
 ) -> FastAPI:
     """
     Create a FastAPI application with web interface for the given environment.
@@ -288,14 +300,16 @@ def create_web_interface_app(
         action_cls: The Action subclass this environment expects
         observation_cls: The Observation subclass this environment returns
         env_name: Optional environment name for README loading
+        max_concurrent_envs: Maximum concurrent WebSocket sessions (passed to create_fastapi_app)
+        concurrency_config: Optional ConcurrencyConfig for advanced settings (passed to create_fastapi_app)
 
     Returns:
         FastAPI application instance with web interface
     """
-    from .http_server import create_fastapi_app
+    from .http_server import create_fastapi_app, ConcurrencyConfig
 
     # Create the base environment app
-    app = create_fastapi_app(env, action_cls, observation_cls)
+    app = create_fastapi_app(env, action_cls, observation_cls, max_concurrent_envs, concurrency_config)
 
     # Load environment metadata
     metadata = load_environment_metadata(env, env_name)

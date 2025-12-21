@@ -187,7 +187,7 @@ class EnvClient(ABC, Generic[ActT, ObsT, StateT]):
         return client
 
     @classmethod
-    def from_hub(
+    def from_env(
         cls: Type[EnvClientT],
         repo_id: str,
         *,
@@ -218,13 +218,13 @@ class EnvClient(ABC, Generic[ActT, ObsT, StateT]):
 
         Examples:
             >>> # Pull and run from HF Docker registry
-            >>> env = MyEnv.from_hub("openenv/echo-env")
+            >>> env = MyEnv.from_env("openenv/echo-env")
             >>>
             >>> # Run locally with UV (clones the space)
-            >>> env = MyEnv.from_hub("openenv/echo-env", use_docker=False)
+            >>> env = MyEnv.from_env("openenv/echo-env", use_docker=False)
             >>>
             >>> # Run from a local checkout
-            >>> env = MyEnv.from_hub(
+            >>> env = MyEnv.from_env(
             ...     "openenv/echo-env",
             ...     use_docker=False,
             ...     project_path="/path/to/local/checkout"
@@ -339,7 +339,7 @@ class EnvClient(ABC, Generic[ActT, ObsT, StateT]):
         """
         Close the WebSocket connection and clean up resources.
 
-        If this client was created via from_docker_image() or from_hub(),
+        If this client was created via from_docker_image() or from_env(),
         this will also stop and remove the associated container/process.
         """
         self.disconnect()

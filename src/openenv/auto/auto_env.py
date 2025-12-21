@@ -19,13 +19,13 @@ Example:
     >>> from openenv import AutoEnv, AutoAction
     >>>
     >>> # From installed package
-    >>> env = AutoEnv.from_hub("coding-env")
+    >>> env = AutoEnv.from_env("coding-env")
     >>>
     >>> # From HuggingFace Hub
-    >>> env = AutoEnv.from_hub("meta-pytorch/coding-env")
+    >>> env = AutoEnv.from_env("meta-pytorch/coding-env")
     >>>
     >>> # With configuration
-    >>> env = AutoEnv.from_hub("coding", env_vars={"DEBUG": "1"})
+    >>> env = AutoEnv.from_env("coding", env_vars={"DEBUG": "1"})
 """
 
 from __future__ import annotations
@@ -43,7 +43,7 @@ from ._discovery import get_discovery, _is_hub_url, _normalize_env_name
 
 if TYPE_CHECKING:
     from openenv.core.containers.runtime import ContainerProvider
-    from openenv.core.http_env_client import HTTPEnvClient
+    from openenv.core.env_client import EnvClient
 
 logger = logging.getLogger(__name__)
 
@@ -67,24 +67,24 @@ class AutoEnv:
 
     Example:
         >>> # From installed package
-        >>> env = AutoEnv.from_hub("coding-env")
+        >>> env = AutoEnv.from_env("coding-env")
         >>>
         >>> # From HuggingFace Hub
-        >>> env = AutoEnv.from_hub("meta-pytorch/coding-env")
+        >>> env = AutoEnv.from_env("meta-pytorch/coding-env")
         >>>
         >>> # List available environments
         >>> AutoEnv.list_environments()
 
     Note:
         AutoEnv is not meant to be instantiated directly. Use the class method
-        from_hub() instead.
+        from_env() instead.
     """
 
     def __init__(self):
         """AutoEnv should not be instantiated directly. Use class methods instead."""
         raise TypeError(
             "AutoEnv is a factory class and should not be instantiated directly. "
-            "Use AutoEnv.from_hub() instead."
+            "Use AutoEnv.from_env() instead."
         )
 
     @classmethod
@@ -113,6 +113,64 @@ class AutoEnv:
         # Convert user/space-name to user-space-name.hf.space
         space_slug = repo_id.replace("/", "-")
         return f"https://{space_slug}.hf.space"
+
+    @classmethod
+    def _is_local_url(cls, url: str) -> bool:
+        """
+        Check if a URL points to a local server.
+
+        Args:
+            url: URL to check
+
+        Returns:
+            True if URL is localhost or 127.0.0.1, False otherwise
+
+        Examples:
+            >>> AutoEnv._is_local_url("http://localhost:8000")
+            True
+            >>> AutoEnv._is_local_url("http://127.0.0.1:8000")
+            True
+            >>> AutoEnv._is_local_url("https://example.com")
+            False
+        """
+        url_lower = url.lower()
+        return "localhost" in url_lower or "127.0.0.1" in url_lower
+
+    @classmethod
+    def _check_server_availability(cls, base_url: str, timeout: float = 2.0) -> bool:
+        """
+        Check if a server at the given URL is running and accessible.
+
+        Args:
+            base_url: Server base URL to check
+            timeout: Request timeout in seconds
+
+        Returns:
+            True if server is accessible, False otherwise
+
+        Examples:
+            >>> AutoEnv._check_server_availability("http://localhost:8000")
+            True  # if server is running
+        """
+        try:
+            # Bypass proxy for localhost to avoid proxy issues
+            proxies = None
+            if cls._is_local_url(base_url):
+                proxies = {"http": None, "https": None}
+
+            # Try to access the health endpoint
+            response = requests.get(
+                f"{base_url}/health", timeout=timeout, proxies=proxies
+            )
+            if response.status_code == 200:
+                return True
+
+            # If health endpoint doesn't exist, try root endpoint
+            response = requests.get(base_url, timeout=timeout, proxies=proxies)
+            return response.status_code == 200
+        except (requests.RequestException, Exception) as e:
+            logger.debug(f"Server {base_url} not accessible: {e}")
+            return False
 
     @classmethod
     def _check_space_availability(cls, space_url: str, timeout: float = 5.0) -> bool:
@@ -347,7 +405,7 @@ class AutoEnv:
         return env_name
 
     @classmethod
-    def from_hub(
+    def from_env(
         cls,
         name: str,
         base_url: Optional[str] = None,
@@ -356,7 +414,7 @@ class AutoEnv:
         wait_timeout: float = 30.0,
         env_vars: Optional[Dict[str, str]] = None,
         **kwargs: Any,
-    ) -> HTTPEnvClient:
+    ) -> "EnvClient":
         """
         Create an environment client from a name or HuggingFace Hub repository.
 
@@ -388,16 +446,16 @@ class AutoEnv:
 
         Examples:
             >>> # From installed package
-            >>> env = AutoEnv.from_hub("coding-env")
+            >>> env = AutoEnv.from_env("coding-env")
             >>>
             >>> # From HuggingFace Hub
-            >>> env = AutoEnv.from_hub("meta-pytorch/coding-env")
+            >>> env = AutoEnv.from_env("meta-pytorch/coding-env")
             >>>
             >>> # With custom Docker image
-            >>> env = AutoEnv.from_hub("coding", docker_image="my-coding-env:v2")
+            >>> env = AutoEnv.from_env("coding", docker_image="my-coding-env:v2")
             >>>
             >>> # With environment variables
-            >>> env = AutoEnv.from_hub(
+            >>> env = AutoEnv.from_env(
             ...     "dipg",
             ...     env_vars={"DIPG_DATASET_PATH": "/data/dipg"}
             ... )
@@ -444,7 +502,7 @@ class AutoEnv:
                 raise ValueError(
                     f"No OpenEnv environments found.\n"
                     f"Install an environment with: pip install openenv-<env-name>\n"
-                    f"Or specify a HuggingFace Hub repository: AutoEnv.from_hub('org/repo')"
+                    f"Or specify a HuggingFace Hub repository: AutoEnv.from_env('org/repo')"
                 )
 
             # Try to suggest similar environment names
@@ -478,14 +536,36 @@ class AutoEnv:
         # Create client instance
         try:
             if base_url:
-                # Connect to existing server at URL (no container management needed)
-                # Explicitly pass provider=None to prevent any container stop attempts
-                return client_class(base_url=base_url, provider=None, **kwargs)
+                # Check if the server at base_url is available
+                is_local = cls._is_local_url(base_url)
+                server_available = cls._check_server_availability(base_url)
+
+                if server_available:
+                    # Server is running, connect directly
+                    logger.info(f"✅ Server available at {base_url}, connecting directly")
+                    return client_class(base_url=base_url, provider=None, **kwargs)
+                elif is_local:
+                    # Local server not running, auto-start Docker container
+                    logger.info(f"❌ Server not available at {base_url}")
+                    logger.info(f"🐳 Auto-starting Docker container: {docker_image}")
+                    return client_class.from_docker_image(
+                        image=docker_image,
+                        provider=container_provider,
+                        wait_timeout=wait_timeout,
+                        env_vars=env_vars or {},
+                        **kwargs,
+                    )
+                else:
+                    # Remote server not available, cannot auto-start
+                    raise ConnectionError(
+                        f"Remote server not available at {base_url}. "
+                        f"Please ensure the server is running."
+                    )
             else:
-                # Start new Docker container
+                # No base_url provided, start new Docker container
                 return client_class.from_docker_image(
                     image=docker_image,
-                    provider=container_provider,  # Fixed: parameter name is 'provider' not 'container_provider'
+                    provider=container_provider,
                     wait_timeout=wait_timeout,
                     env_vars=env_vars or {},
                     **kwargs,

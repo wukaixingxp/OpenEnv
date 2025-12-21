@@ -32,10 +32,10 @@ You can now use the auto-discovery API:
 from openenv import AutoEnv, AutoAction
 
 # Create environment
-env = AutoEnv.from_hub("coding-env")
+env = AutoEnv.from_env("coding-env")
 
 # Get action class
-CodeAction = AutoAction.from_hub("coding-env")
+CodeAction = AutoAction.from_env("coding-env")
 
 # Use them together
 result = env.reset()
@@ -46,7 +46,7 @@ env.close()
 
 ## AutoEnv API
 
-### `AutoEnv.from_hub(name, **kwargs)`
+### `AutoEnv.from_env(name, **kwargs)`
 
 Create an environment client from a name or HuggingFace Hub repository.
 
@@ -69,13 +69,13 @@ Create an environment client from a name or HuggingFace Hub repository.
 from openenv import AutoEnv
 
 # From installed package
-env = AutoEnv.from_hub("coding-env")
+env = AutoEnv.from_env("coding-env")
 
 # From HuggingFace Hub
-env = AutoEnv.from_hub("meta-pytorch/coding-env")
+env = AutoEnv.from_env("meta-pytorch/coding-env")
 
 # With custom configuration
-env = AutoEnv.from_hub(
+env = AutoEnv.from_env(
     "coding",
     docker_image="my-coding-env:v2",
     wait_timeout=60.0,
@@ -129,7 +129,7 @@ env = CodingEnv.from_docker_image("coding-env:latest", wait_timeout=60.0)
 
 ## AutoAction API
 
-### `AutoAction.from_hub(name)`
+### `AutoAction.from_env(name)`
 
 Get the Action class from an environment name or HuggingFace Hub repository.
 
@@ -144,21 +144,21 @@ Get the Action class from an environment name or HuggingFace Hub repository.
 from openenv import AutoAction
 
 # From installed package
-CodeAction = AutoAction.from_hub("coding-env")
+CodeAction = AutoAction.from_env("coding-env")
 action = CodeAction(code="print('Hello!')")
 
 # From HuggingFace Hub
-CodeAction = AutoAction.from_hub("meta-pytorch/coding-env")
+CodeAction = AutoAction.from_env("meta-pytorch/coding-env")
 
 # Different name formats work
-EchoAction = AutoAction.from_hub("echo")
-EchoAction = AutoAction.from_hub("echo-env")
-EchoAction = AutoAction.from_hub("echo_env")
+EchoAction = AutoAction.from_env("echo")
+EchoAction = AutoAction.from_env("echo-env")
+EchoAction = AutoAction.from_env("echo_env")
 ```
 
-### `AutoAction.from_env(env_name)`
+### `AutoAction.from_hub(env_name)`
 
-Alias for `from_hub()` for clarity when working with environment names.
+Alias for `from_env()` for backward compatibility.
 
 ```python
 from openenv import AutoAction
@@ -206,10 +206,10 @@ AutoEnv can automatically connect to environments running on HuggingFace Spaces:
 from openenv import AutoEnv, AutoAction
 
 # Load from HuggingFace Space
-env = AutoEnv.from_hub("username/coding-env-test")
+env = AutoEnv.from_env("username/coding-env-test")
 
 # Get action class
-CodeAction = AutoAction.from_hub("username/coding-env-test")
+CodeAction = AutoAction.from_env("username/coding-env-test")
 
 # Use normally
 result = env.reset()
@@ -239,10 +239,10 @@ print("Available environments:")
 AutoEnv.list_environments()
 
 # 2. Create environment
-env = AutoEnv.from_hub("coding-env")
+env = AutoEnv.from_env("coding-env")
 
 # 3. Get action class
-CodeAction = AutoAction.from_hub("coding-env")
+CodeAction = AutoAction.from_env("coding-env")
 
 # 4. Run environment
 result = env.reset()
@@ -273,7 +273,7 @@ The auto-discovery API provides helpful error messages:
 from openenv import AutoEnv
 
 try:
-    env = AutoEnv.from_hub("nonexistent-env")
+    env = AutoEnv.from_env("nonexistent-env")
 except ValueError as e:
     print(e)
     # Output:
@@ -286,7 +286,7 @@ For typos, it suggests similar environment names:
 
 ```python
 try:
-    env = AutoEnv.from_hub("cooding-env")  # Typo
+    env = AutoEnv.from_env("cooding-env")  # Typo
 except ValueError as e:
     print(e)
     # Output:
@@ -303,10 +303,10 @@ AutoEnv accepts multiple name formats:
 from openenv import AutoEnv
 
 # All of these work and refer to the same environment:
-env = AutoEnv.from_hub("coding")           # Simple name
-env = AutoEnv.from_hub("coding-env")       # With suffix
-env = AutoEnv.from_hub("coding_env")       # With underscore
-env = AutoEnv.from_hub("coding-env:latest") # With tag (ignored)
+env = AutoEnv.from_env("coding")           # Simple name
+env = AutoEnv.from_env("coding-env")       # With suffix
+env = AutoEnv.from_env("coding_env")       # With underscore
+env = AutoEnv.from_env("coding-env:latest") # With tag (ignored)
 ```
 
 ## How It Works

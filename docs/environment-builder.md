@@ -345,7 +345,7 @@ from envs.my_env import MyAction, MyEnv
 # Create environment from Docker image
 client = MyEnv.from_docker_image("my-env:latest")
 # Or, connect to the remote space on Hugging Face
-client = MyEnv.from_hub("my-org/my-env")
+client = MyEnv.from_env("my-org/my-env")
 # Or, connect to the local server
 client = MyEnv(base_url="http://localhost:8000")
 

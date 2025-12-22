@@ -16,19 +16,16 @@ from __future__ import annotations
 import asyncio
 import json
 from concurrent.futures import ThreadPoolExecutor
-from typing import Any, Dict, List, Optional, Type
 from datetime import datetime
+from typing import Any, Dict, List, Optional, Type
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from .interfaces import Environment
-from .serialization import (
-    deserialize_action_with_preprocessing,
-    serialize_observation,
-)
-from .types import Action, Observation, State, EnvironmentMetadata
+from .serialization import deserialize_action_with_preprocessing, serialize_observation
+from .types import Action, EnvironmentMetadata, Observation, State
 
 
 def load_environment_metadata(
@@ -279,23 +276,32 @@ def create_web_interface_app(
     action_cls: Type[Action],
     observation_cls: Type[Observation],
     env_name: Optional[str] = None,
+    max_concurrent_envs: Optional[int] = None,
+    concurrency_config: Optional["ConcurrencyConfig"] = None,
 ) -> FastAPI:
     """
-    Create a FastAPI application with web interface for the given environment.
+      Create a FastAPI application with web interface for the given
+    environment.
 
-    Args:
-        env: The Environment instance to serve
-        action_cls: The Action subclass this environment expects
-        observation_cls: The Observation subclass this environment returns
-        env_name: Optional environment name for README loading
-
-    Returns:
-        FastAPI application instance with web interface
+      Args:
+          env: The Environment instance to serve
+          action_cls: The Action subclass this environment expects
+          observation_cls: The Observation subclass this environment returns
+          env_name: Optional environment name for README loading
+          max_concurrent_envs: Maximum concurrent WebSocket sessions.
+                                 Mutually exclusive with concurrency_config.
+          concurrency_config: Optional ConcurrencyConfig for advanced
+    concurrency settings.
+                        Mutually exclusive with max_concurrent_envs.
+      Returns:
+          FastAPI application instance with web interface
     """
     from .http_server import create_fastapi_app
 
     # Create the base environment app
-    app = create_fastapi_app(env, action_cls, observation_cls)
+    app = create_fastapi_app(
+        env, action_cls, observation_cls, max_concurrent_envs, concurrency_config
+    )
 
     # Load environment metadata
     metadata = load_environment_metadata(env, env_name)
@@ -389,19 +395,19 @@ def get_web_interface_html(
             padding: 0;
             box-sizing: border-box;
         }}
-        
+
         body {{
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
             background-color: #f5f5f5;
             height: 100vh;
             overflow: hidden;
         }}
-        
+
         .container {{
             display: flex;
             height: 100vh;
         }}
-        
+
         .left-pane {{
             width: 50%;
             background: white;
@@ -409,14 +415,14 @@ def get_web_interface_html(
             display: flex;
             flex-direction: column;
         }}
-        
+
         .right-pane {{
             width: 50%;
             background: #fafafa;
             display: flex;
             flex-direction: column;
         }}
-        
+
         .pane-header {{
             padding: 20px;
             border-bottom: 1px solid #e0e0e0;
@@ -424,13 +430,13 @@ def get_web_interface_html(
             font-weight: 600;
             font-size: 16px;
         }}
-        
+
         .pane-content {{
             flex: 1;
             padding: 20px;
             overflow-y: auto;
         }}
-        
+
         .action-form {{
             background: white;
             border: 1px solid #e0e0e0;
@@ -438,18 +444,18 @@ def get_web_interface_html(
             padding: 20px;
             margin-bottom: 20px;
         }}
-        
+
         .form-group {{
             margin-bottom: 15px;
         }}
-        
+
         .form-group label {{
             display: block;
             margin-bottom: 5px;
             font-weight: 500;
             color: #333;
         }}
-        
+
         .form-group input, .form-group textarea {{
             width: 100%;
             padding: 8px 12px;
@@ -457,13 +463,13 @@ def get_web_interface_html(
             border-radius: 4px;
             font-size: 14px;
         }}
-        
+
         .form-group input:focus, .form-group textarea:focus {{
             outline: none;
             border-color: #007bff;
             box-shadow: 0 0 0 2px rgba(0, 123, 255, 0.25);
         }}
-        
+
         .btn {{
             background: #007bff;
             color: white;
@@ -475,24 +481,24 @@ def get_web_interface_html(
             margin-right: 10px;
             margin-bottom: 10px;
         }}
-        
+
         .btn:hover {{
             background: #0056b3;
         }}
-        
+
         .btn:disabled {{
             background: #6c757d;
             cursor: not-allowed;
         }}
-        
+
         .btn-secondary {{
             background: #6c757d;
         }}
-        
+
         .btn-secondary:hover {{
             background: #545b62;
         }}
-        
+
         .state-display {{
             background: white;
             border: 1px solid #e0e0e0;
@@ -500,21 +506,21 @@ def get_web_interface_html(
             padding: 15px;
             margin-bottom: 20px;
         }}
-        
+
         .state-item {{
             margin-bottom: 8px;
         }}
-        
+
         .state-label {{
             font-weight: 500;
             color: #666;
         }}
-        
+
         .state-value {{
             color: #333;
             font-family: monospace;
         }}
-        
+
         .logs-container {{
             background: white;
             border: 1px solid #e0e0e0;
@@ -523,22 +529,22 @@ def get_web_interface_html(
             max-height: 400px;
             overflow-y: auto;
         }}
-        
+
         .log-entry {{
             border-bottom: 1px solid #f0f0f0;
             padding: 10px 0;
         }}
-        
+
         .log-entry:last-child {{
             border-bottom: none;
         }}
-        
+
         .log-timestamp {{
             font-size: 12px;
             color: #666;
             margin-bottom: 5px;
         }}
-        
+
         .log-action {{
             background: #e3f2fd;
             padding: 8px;
@@ -547,7 +553,7 @@ def get_web_interface_html(
             font-family: monospace;
             font-size: 12px;
         }}
-        
+
         .log-observation {{
             background: #f3e5f5;
             padding: 8px;
@@ -555,17 +561,17 @@ def get_web_interface_html(
             font-family: monospace;
             font-size: 12px;
         }}
-        
+
         .log-reward {{
             font-weight: 600;
             color: #28a745;
         }}
-        
+
         .log-done {{
             font-weight: 600;
             color: #dc3545;
         }}
-        
+
         .status-indicator {{
             display: inline-block;
             width: 8px;
@@ -573,15 +579,15 @@ def get_web_interface_html(
             border-radius: 50%;
             margin-right: 8px;
         }}
-        
+
         .status-connected {{
             background: #28a745;
         }}
-        
+
         .status-disconnected {{
             background: #dc3545;
         }}
-        
+
         .json-display {{
             background: #f8f9fa;
             border: 1px solid #e9ecef;
@@ -593,7 +599,7 @@ def get_web_interface_html(
             max-height: 200px;
             overflow-y: auto;
         }}
-        
+
         /* Chat Interface Styles */
         .chat-interface {{
             background: white;
@@ -602,7 +608,7 @@ def get_web_interface_html(
             padding: 20px;
             margin-bottom: 20px;
         }}
-        
+
         .chat-messages {{
             background: #f8f9fa;
             border: 1px solid #e0e0e0;
@@ -612,70 +618,70 @@ def get_web_interface_html(
             max-height: 400px;
             overflow-y: auto;
         }}
-        
+
         .chat-message {{
             margin-bottom: 15px;
             padding: 10px;
             border-radius: 8px;
         }}
-        
+
         .chat-message:last-child {{
             margin-bottom: 0;
         }}
-        
+
         .chat-message.user {{
             background: #e3f2fd;
             margin-left: 20px;
         }}
-        
+
         .chat-message.assistant {{
             background: #f3e5f5;
             margin-right: 20px;
         }}
-        
+
         .chat-message.system {{
             background: #e8f5e8;
             font-style: italic;
         }}
-        
+
         .message-role {{
             font-weight: 600;
             font-size: 12px;
             color: #666;
             margin-bottom: 5px;
         }}
-        
+
         .message-content {{
             font-size: 14px;
             line-height: 1.4;
         }}
-        
+
         .chat-input-container {{
             border-top: 1px solid #e0e0e0;
             padding-top: 15px;
         }}
-        
+
         .role-selector {{
             margin-bottom: 10px;
         }}
-        
+
         .role-selector label {{
             font-weight: 500;
             margin-right: 10px;
         }}
-        
+
         .role-selector select {{
             padding: 5px 10px;
             border: 1px solid #ddd;
             border-radius: 4px;
         }}
-        
+
         .message-input {{
             display: flex;
             gap: 10px;
             align-items: flex-end;
         }}
-        
+
         .message-input textarea {{
             flex: 1;
             padding: 10px;
@@ -684,13 +690,13 @@ def get_web_interface_html(
             resize: vertical;
             font-family: inherit;
         }}
-        
+
         .message-input textarea:focus {{
             outline: none;
             border-color: #007bff;
             box-shadow: 0 0 0 2px rgba(0, 123, 255, 0.25);
         }}
-        
+
         /* Instructions Section Styles */
         .instructions-section {{
             background: white;
@@ -699,21 +705,21 @@ def get_web_interface_html(
             padding: 20px;
             margin-bottom: 20px;
         }}
-        
+
         .instructions-header {{
             display: flex;
             justify-content: space-between;
             align-items: center;
             margin-bottom: 15px;
         }}
-        
+
         .instructions-title {{
             font-size: 18px;
             font-weight: 600;
             color: #333;
             margin: 0;
         }}
-        
+
         .instructions-toggle {{
             background: #f8f9fa;
             border: 1px solid #dee2e6;
@@ -723,11 +729,11 @@ def get_web_interface_html(
             font-size: 12px;
             color: #6c757d;
         }}
-        
+
         .instructions-toggle:hover {{
             background: #e9ecef;
         }}
-        
+
         .instructions-content {{
             display: none;
             max-height: 400px;
@@ -735,11 +741,11 @@ def get_web_interface_html(
             border-top: 1px solid #e0e0e0;
             padding-top: 15px;
         }}
-        
+
         .instructions-content.expanded {{
             display: block;
         }}
-        
+
         .instructions-content h1,
         .instructions-content h2,
         .instructions-content h3 {{
@@ -747,26 +753,26 @@ def get_web_interface_html(
             margin-top: 20px;
             margin-bottom: 10px;
         }}
-        
+
         .instructions-content h1 {{
             font-size: 24px;
             border-bottom: 2px solid #007bff;
             padding-bottom: 10px;
         }}
-        
+
         .instructions-content h2 {{
             font-size: 20px;
         }}
-        
+
         .instructions-content h3 {{
             font-size: 16px;
         }}
-        
+
         .instructions-content p {{
             margin-bottom: 10px;
             line-height: 1.6;
         }}
-        
+
         .instructions-content code {{
             background: #f8f9fa;
             padding: 2px 4px;
@@ -774,7 +780,7 @@ def get_web_interface_html(
             font-family: monospace;
             font-size: 14px;
         }}
-        
+
         .instructions-content pre {{
             background: #f8f9fa;
             border: 1px solid #e9ecef;
@@ -783,40 +789,40 @@ def get_web_interface_html(
             overflow-x: auto;
             margin: 10px 0;
         }}
-        
+
         .instructions-content pre code {{
             background: none;
             padding: 0;
         }}
-        
+
         .instructions-content ul,
         .instructions-content ol {{
             margin: 10px 0;
             padding-left: 20px;
         }}
-        
+
         .instructions-content li {{
             margin-bottom: 5px;
         }}
-        
+
         .instructions-content table {{
             border-collapse: collapse;
             width: 100%;
             margin: 15px 0;
         }}
-        
+
         .instructions-content th,
         .instructions-content td {{
             border: 1px solid #dee2e6;
             padding: 8px 12px;
             text-align: left;
         }}
-        
+
         .instructions-content th {{
             background: #f8f9fa;
             font-weight: 600;
         }}
-        
+
         /* Enhanced Form Styles */
         .help-text {{
             display: block;
@@ -825,13 +831,13 @@ def get_web_interface_html(
             color: #6c757d;
             font-style: italic;
         }}
-        
+
         .form-group label {{
             font-weight: 500;
             color: #333;
             margin-bottom: 5px;
         }}
-        
+
         .form-group select {{
             width: 100%;
             padding: 8px 12px;
@@ -840,13 +846,13 @@ def get_web_interface_html(
             font-size: 14px;
             background-color: white;
         }}
-        
+
         .form-group select:focus {{
             outline: none;
             border-color: #007bff;
             box-shadow: 0 0 0 2px rgba(0, 123, 255, 0.25);
         }}
-        
+
         .form-group textarea {{
             width: 100%;
             padding: 8px 12px;
@@ -856,13 +862,13 @@ def get_web_interface_html(
             font-family: inherit;
             resize: vertical;
         }}
-        
+
         .form-group textarea:focus {{
             outline: none;
             border-color: #007bff;
             box-shadow: 0 0 0 2px rgba(0, 123, 255, 0.25);
         }}
-        
+
         .form-group input[type="number"] {{
             width: 100%;
             padding: 8px 12px;
@@ -870,24 +876,24 @@ def get_web_interface_html(
             border-radius: 4px;
             font-size: 14px;
         }}
-        
+
         .form-group input[type="number"]:focus {{
             outline: none;
             border-color: #007bff;
             box-shadow: 0 0 0 2px rgba(0, 123, 255, 0.25);
         }}
-        
+
         .form-group input[type="text"]:focus {{
             outline: none;
             border-color: #007bff;
             box-shadow: 0 0 0 2px rgba(0, 123, 255, 0.25);
         }}
-        
+
         .required-indicator {{
             color: #dc3545;
             font-weight: bold;
         }}
-        
+
         .form-group .field-description {{
             font-size: 11px;
             color: #666;
@@ -907,16 +913,16 @@ def get_web_interface_html(
             <div class="pane-content">
                 <!-- Instructions Section -->
                 {_generate_instructions_section(metadata)}
-                
+
                 <!-- Action Form or Chat Interface -->
                 {_generate_action_interface(action_fields, is_chat_env)}
-                
+
                 <!-- Control Buttons -->
                 <div style="margin-bottom: 20px;">
                     <button class="btn btn-secondary" id="reset-btn">Reset Environment</button>
                     <button class="btn btn-secondary" id="state-btn">Get State</button>
                 </div>
-                
+
                 <!-- Current State Display -->
                 <div class="state-display">
                     <h3>Current State</h3>
@@ -937,7 +943,7 @@ def get_web_interface_html(
                 </div>
             </div>
         </div>
-        
+
         <!-- Right Pane: State Observer -->
         <div class="right-pane">
             <div class="pane-header">
@@ -951,7 +957,7 @@ def get_web_interface_html(
                         No observation yet
                     </div>
                 </div>
-                
+
                 <!-- Action Logs -->
                 <div class="logs-container">
                     <h3>Action History</h3>
@@ -970,31 +976,31 @@ def get_web_interface_html(
                 this.isConnected = false;
                 this.init();
             }}
-            
+
             init() {{
                 this.connectWebSocket();
                 this.setupEventListeners();
             }}
-            
+
             connectWebSocket() {{
                 const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
                 const wsUrl = `${{protocol}}//${{window.location.host}}/ws/ui`;
-                
+
                 this.ws = new WebSocket(wsUrl);
-                
+
                 this.ws.onopen = () => {{
                     this.isConnected = true;
                     this.updateConnectionStatus(true);
                     console.log('WebSocket connected');
                 }};
-                
+
                 this.ws.onmessage = (event) => {{
                     const data = JSON.parse(event.data);
                     if (data.type === 'state_update') {{
                         this.updateUI(data.episode_state);
                     }}
                 }};
-                
+
                 this.ws.onclose = () => {{
                     this.isConnected = false;
                     this.updateConnectionStatus(false);
@@ -1002,12 +1008,12 @@ def get_web_interface_html(
                     // Attempt to reconnect after 3 seconds
                     setTimeout(() => this.connectWebSocket(), 3000);
                 }};
-                
+
                 this.ws.onerror = (error) => {{
                     console.error('WebSocket error:', error);
                 }};
             }}
-            
+
             setupEventListeners() {{
                 // Instructions toggle
                 const instructionsToggle = document.getElementById('instructions-toggle');
@@ -1015,20 +1021,20 @@ def get_web_interface_html(
                 if (instructionsToggle && instructionsContent) {{
                     instructionsToggle.addEventListener('click', () => {{
                         instructionsContent.classList.toggle('expanded');
-                        instructionsToggle.textContent = instructionsContent.classList.contains('expanded') 
+                        instructionsToggle.textContent = instructionsContent.classList.contains('expanded')
                             ? 'Hide Instructions' : 'Show Instructions';
                     }});
                 }}
-                
+
                 // Check if this is a chat environment
                 const isChatEnv = document.getElementById('chat-messages') !== null;
-                
+
                 if (isChatEnv) {{
                     // Chat environment event listeners
                     document.getElementById('send-message-btn').addEventListener('click', () => {{
                         this.sendMessage();
                     }});
-                    
+
                     // Send message on Enter (but allow Shift+Enter for new lines)
                     document.getElementById('message-input').addEventListener('keydown', (e) => {{
                         if (e.key === 'Enter' && !e.shiftKey) {{
@@ -1046,51 +1052,51 @@ def get_web_interface_html(
                         }});
                     }}
                 }}
-                
+
                 // Reset button
                 document.getElementById('reset-btn').addEventListener('click', () => {{
                     this.resetEnvironment();
                 }});
-                
+
                 // State button
                 document.getElementById('state-btn').addEventListener('click', () => {{
                     this.getState();
                 }});
             }}
-            
+
             async sendMessage() {{
                 const messageInput = document.getElementById('message-input');
                 const roleSelect = document.getElementById('message-role');
                 const message = messageInput.value.trim();
                 const role = roleSelect.value;
-                
+
                 if (!message) {{
                     return;
                 }}
-                
+
                 // Add message to chat display immediately
                 this.addMessageToChat(role, message);
-                
+
                 // Clear input
                 messageInput.value = '';
-                
+
                 try {{
                     // Send message to server to convert to action and step
                     const response = await fetch('/web/step', {{
                         method: 'POST',
                         headers: {{ 'Content-Type': 'application/json' }},
-                        body: JSON.stringify({{ 
+                        body: JSON.stringify({{
                             message: {{
                                 role: role,
                                 content: message
                             }}
                         }})
                     }});
-                    
+
                     if (!response.ok) {{
                         throw new Error(`HTTP error! status: ${{response.status}}`);
                     }}
-                    
+
                     const result = await response.json();
                     console.log('Message sent:', result);
                 }} catch (error) {{
@@ -1098,25 +1104,25 @@ def get_web_interface_html(
                     alert('Error sending message: ' + error.message);
                 }}
             }}
-            
+
             addMessageToChat(role, content) {{
                 const chatMessages = document.getElementById('chat-messages');
                 const messageDiv = document.createElement('div');
                 messageDiv.className = `chat-message ${{role}}`;
-                
+
                 messageDiv.innerHTML = `
                     <div class="message-role">${{role.charAt(0).toUpperCase() + role.slice(1)}}</div>
                     <div class="message-content">${{content}}</div>
                 `;
-                
+
                 chatMessages.appendChild(messageDiv);
                 chatMessages.scrollTop = chatMessages.scrollHeight;
             }}
-            
+
             async submitAction() {{
                 const formData = new FormData(document.getElementById('action-form'));
                 const action = {{}};
-                
+
                 // Collect form data
                 for (const [key, value] of formData.entries()) {{
                     if (value !== '') {{
@@ -1133,18 +1139,18 @@ def get_web_interface_html(
                         }}
                     }}
                 }}
-                
+
                 try {{
                     const response = await fetch('/web/step', {{
                         method: 'POST',
                         headers: {{ 'Content-Type': 'application/json' }},
                         body: JSON.stringify({{ action }})
                     }});
-                    
+
                     if (!response.ok) {{
                         throw new Error(`HTTP error! status: ${{response.status}}`);
                     }}
-                    
+
                     const result = await response.json();
                     console.log('Step result:', result);
                 }} catch (error) {{
@@ -1152,18 +1158,18 @@ def get_web_interface_html(
                     alert('Error submitting action: ' + error.message);
                 }}
             }}
-            
+
             async resetEnvironment() {{
                 try {{
                     const response = await fetch('/web/reset', {{
                         method: 'POST',
                         headers: {{ 'Content-Type': 'application/json' }}
                     }});
-                    
+
                     if (!response.ok) {{
                         throw new Error(`HTTP error! status: ${{response.status}}`);
                     }}
-                    
+
                     const result = await response.json();
                     console.log('Reset result:', result);
                 }} catch (error) {{
@@ -1171,7 +1177,7 @@ def get_web_interface_html(
                     alert('Error resetting environment: ' + error.message);
                 }}
             }}
-            
+
             async getState() {{
                 try {{
                     const response = await fetch('/web/state');
@@ -1183,7 +1189,7 @@ def get_web_interface_html(
                     alert('Error getting state: ' + error.message);
                 }}
             }}
-            
+
             updateConnectionStatus(connected) {{
                 const indicator = document.getElementById('connection-status');
                 if (connected) {{
@@ -1192,19 +1198,19 @@ def get_web_interface_html(
                     indicator.className = 'status-indicator status-disconnected';
                 }}
             }}
-            
+
             updateUI(episodeState) {{
                 // Check if this is a chat environment
                 const isChatEnv = document.getElementById('chat-messages') !== null;
-                
+
                 // Update current state
-                document.getElementById('env-status').textContent = 
+                document.getElementById('env-status').textContent =
                     episodeState.is_reset ? 'Reset' : 'Running';
-                document.getElementById('episode-id').textContent = 
+                document.getElementById('episode-id').textContent =
                     episodeState.episode_id || '-';
-                document.getElementById('step-count').textContent = 
+                document.getElementById('step-count').textContent =
                     episodeState.step_count.toString();
-                
+
                 if (isChatEnv) {{
                     // Update chat interface
                     this.updateChatInterface(episodeState);
@@ -1219,7 +1225,7 @@ def get_web_interface_html(
                         observationDiv.textContent = 'No observation yet';
                     }}
                 }}
-                
+
                 // Update action logs
                 const logsDiv = document.getElementById('action-logs');
                 if (episodeState.action_logs.length === 0) {{
@@ -1238,18 +1244,18 @@ def get_web_interface_html(
                     `).join('');
                 }}
             }}
-            
+
             updateChatInterface(episodeState) {{
                 const chatMessages = document.getElementById('chat-messages');
                 if (!chatMessages) return;
-                
+
                 // Clear existing messages (except system message)
                 const systemMessage = chatMessages.querySelector('.chat-message.system');
                 chatMessages.innerHTML = '';
                 if (systemMessage) {{
                     chatMessages.appendChild(systemMessage);
                 }}
-                
+
                 // Add messages from current observation
                 if (episodeState.current_observation && episodeState.current_observation.messages) {{
                     episodeState.current_observation.messages.forEach(msg => {{
@@ -1258,7 +1264,7 @@ def get_web_interface_html(
                 }}
             }}
         }}
-        
+
         // Initialize the web interface when the page loads
         document.addEventListener('DOMContentLoaded', () => {{
             new OpenEnvWebInterface();
@@ -1562,7 +1568,7 @@ def _generate_single_field(field: Dict[str, Any]) -> str:
 
     if field_type == "checkbox":
         checked = "checked" if default_value is True else ""
-        return f'''
+        return f"""
             <div class="form-group">
                 <label>
                     <input type="checkbox" name="{field_name}" value="true" {checked}>
@@ -1570,7 +1576,7 @@ def _generate_single_field(field: Dict[str, Any]) -> str:
                 </label>
                 {f'<small class="help-text">{help_text}</small>' if help_text else ""}
             </div>
-        '''
+        """
 
     elif field_type == "select":
         options_html = []
@@ -1583,7 +1589,7 @@ def _generate_single_field(field: Dict[str, Any]) -> str:
                 f'<option value="{choice}" {selected}>{choice}</option>'
             )
 
-        return f'''
+        return f"""
             <div class="form-group">
                 <label for="{field_name}">{label_text}:</label>
                 <select name="{field_name}" id="{field_name}" {attrs_str}>
@@ -1591,31 +1597,31 @@ def _generate_single_field(field: Dict[str, Any]) -> str:
                 </select>
                 {f'<small class="help-text">{help_text}</small>' if help_text else ""}
             </div>
-        '''
+        """
 
     elif field_type == "tensor":
-        return f'''
+        return f"""
             <div class="form-group">
                 <label for="{field_name}">{label_text} (comma-separated integers):</label>
                 <input type="text" name="{field_name}" id="{field_name}" {attrs_str}>
                 <small class="help-text">{help_text or "Enter token IDs as comma-separated integers (e.g., 1,2,3,4,5)"}</small>
             </div>
-        '''
+        """
 
     elif field_type == "textarea":
-        return f'''
+        return f"""
             <div class="form-group">
                 <label for="{field_name}">{label_text}:</label>
                 <textarea name="{field_name}" id="{field_name}" rows="3" {attrs_str}>{default_value if default_value is not None else ""}</textarea>
                 {f'<small class="help-text">{help_text}</small>' if help_text else ""}
             </div>
-        '''
+        """
 
     else:
-        return f'''
+        return f"""
             <div class="form-group">
                 <label for="{field_name}">{label_text}:</label>
                 <input type="{field_type}" name="{field_name}" id="{field_name}" {attrs_str}>
                 {f'<small class="help-text">{help_text}</small>' if help_text else ""}
             </div>
-        '''
+        """

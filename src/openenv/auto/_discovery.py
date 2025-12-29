@@ -223,7 +223,9 @@ def _infer_class_name(env_name: str, class_type: str) -> str:
         raise ValueError(f"Unknown class type: {class_type}")
 
 
-def _load_manifest_from_package(package_name: str, module_name: str) -> Optional[Dict[str, Any]]:
+def _load_manifest_from_package(
+    package_name: str, module_name: str
+) -> Optional[Dict[str, Any]]:
     """
     Load openenv.yaml manifest from an installed package.
 
@@ -237,7 +239,7 @@ def _load_manifest_from_package(package_name: str, module_name: str) -> Optional
     """
     try:
         # Try to read openenv.yaml from package
-        if hasattr(importlib.resources, 'files'):
+        if hasattr(importlib.resources, "files"):
             # Python 3.9+
             package_files = importlib.resources.files(module_name)
             if (package_files / "openenv.yaml").is_file():
@@ -255,7 +257,9 @@ def _load_manifest_from_package(package_name: str, module_name: str) -> Optional
         return None
 
 
-def _create_env_info_from_package(package_name: str, module_name: str, version: str) -> Optional[EnvironmentInfo]:
+def _create_env_info_from_package(
+    package_name: str, module_name: str, version: str
+) -> Optional[EnvironmentInfo]:
     """
     Create EnvironmentInfo from an installed package.
 
@@ -285,7 +289,11 @@ def _create_env_info_from_package(package_name: str, module_name: str, version: 
     env_key = env_name.replace("_env", "") if env_name.endswith("_env") else env_name
 
     # Get description
-    description = manifest.get("description", f"{env_name} environment") if manifest else f"{env_name} environment"
+    description = (
+        manifest.get("description", f"{env_name} environment")
+        if manifest
+        else f"{env_name} environment"
+    )
 
     # Get spec version
     spec_version = manifest.get("spec_version") if manifest else None
@@ -295,8 +303,12 @@ def _create_env_info_from_package(package_name: str, module_name: str, version: 
     if manifest and "action" in manifest and "observation" in manifest:
         # Custom format (like coding_env)
         client_class_name = _infer_class_name(env_name, "client")
-        action_class_name = manifest.get("action", _infer_class_name(env_name, "action"))
-        observation_class_name = manifest.get("observation", _infer_class_name(env_name, "observation"))
+        action_class_name = manifest.get(
+            "action", _infer_class_name(env_name, "action")
+        )
+        observation_class_name = manifest.get(
+            "observation", _infer_class_name(env_name, "observation")
+        )
     else:
         # Use conventions
         client_class_name = _infer_class_name(env_name, "client")
@@ -372,11 +384,15 @@ class EnvironmentDiscovery:
 
             try:
                 # Create environment info
-                env_info = _create_env_info_from_package(package_name, module_name, version)
+                env_info = _create_env_info_from_package(
+                    package_name, module_name, version
+                )
 
                 if env_info:
                     environments[env_info.env_key] = env_info
-                    logger.debug(f"Discovered environment: {env_info.env_key} ({package_name})")
+                    logger.debug(
+                        f"Discovered environment: {env_info.env_key} ({package_name})"
+                    )
 
             except Exception as e:
                 logger.warning(f"Failed to load environment from {package_name}: {e}")

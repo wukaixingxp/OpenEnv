@@ -47,7 +47,7 @@ class TestEnvironmentInfo:
             client_class_name="EchoEnv",
             action_class_name="EchoAction",
             observation_class_name="EchoObservation",
-            default_image="echo-env:latest"
+            default_image="echo-env:latest",
         )
 
         assert env_info.env_key == "echo"
@@ -111,7 +111,7 @@ class TestHelperFunctions:
 class TestCreateEnvInfoFromPackage:
     """Test creating EnvironmentInfo from package data."""
 
-    @patch('openenv.auto._discovery._load_manifest_from_package')
+    @patch("openenv.auto._discovery._load_manifest_from_package")
     def test_create_env_info_with_manifest(self, mock_load_manifest):
         """Test creating env info when manifest exists."""
         # Mock manifest data
@@ -123,9 +123,7 @@ class TestCreateEnvInfoFromPackage:
         }
 
         env_info = _create_env_info_from_package(
-            package_name="openenv-echo-env",
-            module_name="echo_env",
-            version="0.1.0"
+            package_name="openenv-echo-env", module_name="echo_env", version="0.1.0"
         )
 
         assert env_info is not None
@@ -136,7 +134,7 @@ class TestCreateEnvInfoFromPackage:
         assert env_info.client_class_name == "EchoEnv"
         assert env_info.action_class_name == "EchoAction"
 
-    @patch('openenv.auto._discovery._load_manifest_from_package')
+    @patch("openenv.auto._discovery._load_manifest_from_package")
     def test_create_env_info_with_custom_class_names(self, mock_load_manifest):
         """Test creating env info with custom class names from manifest."""
         # Mock manifest with custom class names
@@ -149,23 +147,19 @@ class TestCreateEnvInfoFromPackage:
         }
 
         env_info = _create_env_info_from_package(
-            package_name="openenv-coding_env",
-            module_name="coding_env",
-            version="0.1.0"
+            package_name="openenv-coding_env", module_name="coding_env", version="0.1.0"
         )
 
         assert env_info.action_class_name == "CodeAction"
         assert env_info.observation_class_name == "CodeObservation"
 
-    @patch('openenv.auto._discovery._load_manifest_from_package')
+    @patch("openenv.auto._discovery._load_manifest_from_package")
     def test_create_env_info_without_manifest(self, mock_load_manifest):
         """Test creating env info when no manifest exists (uses conventions)."""
         mock_load_manifest.return_value = None
 
         env_info = _create_env_info_from_package(
-            package_name="openenv-test-env",
-            module_name="test_env",
-            version="1.0.0"
+            package_name="openenv-test-env", module_name="test_env", version="1.0.0"
         )
 
         assert env_info is not None
@@ -178,8 +172,8 @@ class TestCreateEnvInfoFromPackage:
 class TestEnvironmentDiscovery:
     """Test EnvironmentDiscovery class."""
 
-    @patch('importlib.metadata.distributions')
-    @patch('openenv.auto._discovery._create_env_info_from_package')
+    @patch("importlib.metadata.distributions")
+    @patch("openenv.auto._discovery._create_env_info_from_package")
     def test_discover_installed_packages(self, mock_create_info, mock_distributions):
         """Test discovering installed packages."""
         # Mock distribution objects
@@ -209,7 +203,7 @@ class TestEnvironmentDiscovery:
                 client_class_name=f"{module_name.replace('_env', '').capitalize()}Env",
                 action_class_name=f"{module_name.replace('_env', '').capitalize()}Action",
                 observation_class_name=f"{module_name.replace('_env', '').capitalize()}Observation",
-                default_image=f"{module_name.replace('_', '-')}:latest"
+                default_image=f"{module_name.replace('_', '-')}:latest",
             )
 
         mock_create_info.side_effect = create_info_side_effect
@@ -227,7 +221,7 @@ class TestEnvironmentDiscovery:
         discovery = EnvironmentDiscovery()
 
         # Mock the discover method
-        with patch.object(discovery, 'discover') as mock_discover:
+        with patch.object(discovery, "discover") as mock_discover:
             mock_discover.return_value = {
                 "echo": EnvironmentInfo(
                     env_key="echo",
@@ -239,7 +233,7 @@ class TestEnvironmentDiscovery:
                     client_class_name="EchoEnv",
                     action_class_name="EchoAction",
                     observation_class_name="EchoObservation",
-                    default_image="echo-env:latest"
+                    default_image="echo-env:latest",
                 )
             }
 
@@ -251,7 +245,7 @@ class TestEnvironmentDiscovery:
         """Test getting a non-existent environment."""
         discovery = EnvironmentDiscovery()
 
-        with patch.object(discovery, 'discover') as mock_discover:
+        with patch.object(discovery, "discover") as mock_discover:
             mock_discover.return_value = {}
 
             env = discovery.get_environment("nonexistent")
@@ -271,10 +265,10 @@ class TestEnvironmentDiscovery:
             client_class_name="EchoEnv",
             action_class_name="EchoAction",
             observation_class_name="EchoObservation",
-            default_image="echo-env:latest"
+            default_image="echo-env:latest",
         )
 
-        with patch.object(discovery, 'discover') as mock_discover:
+        with patch.object(discovery, "discover") as mock_discover:
             mock_discover.return_value = {"echo": mock_env}
 
             # All these should work
@@ -297,7 +291,7 @@ class TestEnvironmentDiscovery:
             client_class_name="TestEnv",
             action_class_name="TestAction",
             observation_class_name="TestObservation",
-            default_image="test-env:latest"
+            default_image="test-env:latest",
         )
 
         envs = {"test": mock_env}
@@ -358,11 +352,11 @@ class TestListEnvironments:
                 client_class_name="EchoEnv",
                 action_class_name="EchoAction",
                 observation_class_name="EchoObservation",
-                default_image="echo-env:latest"
+                default_image="echo-env:latest",
             )
         }
 
-        with patch.object(discovery, 'discover', return_value=mock_envs):
+        with patch.object(discovery, "discover", return_value=mock_envs):
             discovery.list_environments()
 
         captured = capsys.readouterr()
@@ -374,7 +368,7 @@ class TestListEnvironments:
         """Test listing when no environments are found."""
         discovery = EnvironmentDiscovery()
 
-        with patch.object(discovery, 'discover', return_value={}):
+        with patch.object(discovery, "discover", return_value={}):
             discovery.list_environments()
 
         captured = capsys.readouterr()

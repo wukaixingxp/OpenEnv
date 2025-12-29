@@ -84,7 +84,7 @@ class AutoEnv:
         """AutoEnv should not be instantiated directly. Use class methods instead."""
         raise TypeError(
             "AutoEnv is a factory class and should not be instantiated directly. "
-            "Use AutoEnv.from_env() instead."
+            "Use AutoEnv.from_hub() or AutoEnv.from_env() instead."
         )
 
     @classmethod
@@ -193,7 +193,7 @@ class AutoEnv:
             response = requests.get(f"{space_url}/health", timeout=timeout)
             if response.status_code == 200:
                 return True
-            
+
             # If health endpoint doesn't exist, try root endpoint
             response = requests.get(space_url, timeout=timeout)
             return response.status_code == 200
@@ -202,9 +202,7 @@ class AutoEnv:
             return False
 
     @classmethod
-    def _download_from_hub(
-        cls, repo_id: str, cache_dir: Optional[Path] = None
-    ) -> Path:
+    def _download_from_hub(cls, repo_id: str, cache_dir: Optional[Path] = None) -> Path:
         """
         Download environment from HuggingFace Hub.
 
@@ -241,7 +239,8 @@ class AutoEnv:
             # Download to cache
             env_path = snapshot_download(
                 repo_id=repo_id,
-                cache_dir=cache_dir or Path(tempfile.gettempdir()) / "openenv_hub_cache",
+                cache_dir=cache_dir
+                or Path(tempfile.gettempdir()) / "openenv_hub_cache",
                 repo_type="space",  # OpenEnv environments are published as Spaces
             )
             return Path(env_path)
@@ -307,17 +306,17 @@ class AutoEnv:
     def _get_package_name_from_hub(cls, name: str) -> tuple[str, Path]:
         """
         Download Space and get the package name from pyproject.toml.
-        
+
         Args:
             name: HuggingFace repo ID (e.g., "wukaixingxp/coding-env-test")
-            
+
         Returns:
             Tuple of (package_name, env_path)
             Example: ("openenv-coding_env", Path("/tmp/..."))
         """
         # Download from Hub
         env_path = cls._download_from_hub(name)
-        
+
         # Read package name from pyproject.toml
         import tomli
 
@@ -329,28 +328,29 @@ class AutoEnv:
 
         with open(pyproject_path, "rb") as f:
             pyproject = tomli.load(f)
-        
+
         package_name = pyproject.get("project", {}).get("name")
         if not package_name:
             raise ValueError(
                 f"Could not determine package name from pyproject.toml at {pyproject_path}"
             )
-        
+
         return package_name, env_path
 
     @classmethod
     def _is_package_installed(cls, package_name: str) -> bool:
         """
         Check if a package is already installed.
-        
+
         Args:
             package_name: Package name (e.g., "openenv-coding_env")
-            
+
         Returns:
             True if installed, False otherwise
         """
         try:
             import importlib.metadata
+
             importlib.metadata.distribution(package_name)
             return True
         except importlib.metadata.PackageNotFoundError:
@@ -360,28 +360,28 @@ class AutoEnv:
     def _ensure_package_from_hub(cls, name: str) -> str:
         """
         Ensure package from HuggingFace Hub is installed.
-        
+
         Only downloads and installs if not already installed.
         Uses a cache to avoid redundant downloads for the same repo ID.
-        
+
         Args:
             name: HuggingFace repo ID (e.g., "wukaixingxp/coding-env-test")
-            
+
         Returns:
             Environment name (e.g., "coding_env")
         """
         global _hub_env_name_cache
-        
+
         # Check if we already resolved this repo ID
         if name in _hub_env_name_cache:
             env_name = _hub_env_name_cache[name]
             logger.debug(f"✅ Using cached env name for {name}: {env_name}")
             return env_name
-        
+
         # Download and get actual package name from pyproject.toml
         logger.info(f"📦 Checking package from HuggingFace Space...")
         package_name, env_path = cls._get_package_name_from_hub(name)
-        
+
         # Check if already installed
         if cls._is_package_installed(package_name):
             logger.info(f"✅ Package already installed: {package_name}")
@@ -394,14 +394,14 @@ class AutoEnv:
             cls._install_from_path(env_path)
             # Clear discovery cache to pick up the newly installed package
             get_discovery().clear_cache()
-        
+
         # Extract environment name from package name
         # "openenv-coding_env" -> "coding_env"
         env_name = package_name.replace("openenv-", "").replace("-", "_")
-        
+
         # Cache the result to avoid redundant downloads
         _hub_env_name_cache[name] = env_name
-        
+
         return env_name
 
     @classmethod
@@ -465,17 +465,19 @@ class AutoEnv:
             # Try to connect to Space directly first
             space_url = cls._resolve_space_url(name)
             logger.info(f"Checking if HuggingFace Space is accessible: {space_url}")
-            
+
             space_is_available = cls._check_space_availability(space_url)
-            
+
             if space_is_available and base_url is None:
                 # Space is accessible! We'll connect directly without Docker
                 logger.info(f"✅ Space is accessible at: {space_url}")
-                logger.info("📦 Installing package for client code (no Docker needed)...")
-                
+                logger.info(
+                    "📦 Installing package for client code (no Docker needed)..."
+                )
+
                 # Ensure package is installed (downloads only if needed)
                 env_name = cls._ensure_package_from_hub(name)
-                
+
                 # Set base_url to connect to remote Space
                 base_url = space_url
                 logger.info(f"🚀 Will connect to remote Space (no local Docker)")
@@ -484,7 +486,7 @@ class AutoEnv:
                 if not space_is_available:
                     logger.info(f"❌ Space not accessible at {space_url}")
                     logger.info("📦 Falling back to local Docker mode...")
-                
+
                 # Ensure package is installed (downloads only if needed)
                 env_name = cls._ensure_package_from_hub(name)
         else:
@@ -542,7 +544,9 @@ class AutoEnv:
 
                 if server_available:
                     # Server is running, connect directly
-                    logger.info(f"✅ Server available at {base_url}, connecting directly")
+                    logger.info(
+                        f"✅ Server available at {base_url}, connecting directly"
+                    )
                     return client_class(base_url=base_url, provider=None, **kwargs)
                 elif is_local:
                     # Local server not running, auto-start Docker container
@@ -577,6 +581,48 @@ class AutoEnv:
                 f"Docker image: {docker_image}\n"
                 f"Error: {e}"
             ) from e
+
+    @classmethod
+    def from_hub(
+        cls,
+        name: str,
+        base_url: Optional[str] = None,
+        docker_image: Optional[str] = None,
+        container_provider: Optional["ContainerProvider"] = None,
+        wait_timeout: float = 30.0,
+        env_vars: Optional[Dict[str, str]] = None,
+        **kwargs: Any,
+    ) -> "EnvClient":
+        """
+        Create an environment client from a name or HuggingFace Hub repository.
+
+        This is an alias for from_env() for backward compatibility.
+
+        Args:
+            name: Environment name or HuggingFace Hub repo ID
+            base_url: Optional base URL for HTTP connection
+            docker_image: Optional Docker image name (overrides default)
+            container_provider: Optional container provider
+            wait_timeout: Timeout for container startup (seconds)
+            env_vars: Optional environment variables for the container
+            **kwargs: Additional arguments passed to the client class
+
+        Returns:
+            Instance of the environment client class
+
+        Examples:
+            >>> env = AutoEnv.from_hub("coding-env")
+            >>> env = AutoEnv.from_hub("meta-pytorch/coding-env")
+        """
+        return cls.from_env(
+            name=name,
+            base_url=base_url,
+            docker_image=docker_image,
+            container_provider=container_provider,
+            wait_timeout=wait_timeout,
+            env_vars=env_vars,
+            **kwargs,
+        )
 
     @classmethod
     def get_env_class(cls, name: str):

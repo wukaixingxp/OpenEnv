@@ -110,7 +110,7 @@ class TestAutoEnvInstantiation:
         """AutoEnv should raise TypeError when instantiated directly."""
         with pytest.raises(TypeError) as exc_info:
             AutoEnv()
-        
+
         assert "factory class" in str(exc_info.value).lower()
         assert "AutoEnv.from_hub()" in str(exc_info.value)
 
@@ -121,32 +121,34 @@ class TestAutoEnvGetEnvClass:
     def test_get_env_class_success(self, mock_discovery, mock_env_info):
         """Test getting environment class successfully."""
         # Mock the discovery
-        with patch('openenv.auto.auto_env.get_discovery', return_value=mock_discovery):
+        with patch("openenv.auto.auto_env.get_discovery", return_value=mock_discovery):
             # Mock the client class
             mock_client_class = Mock()
             mock_env_info.get_client_class = Mock(return_value=mock_client_class)
-            
+
             result = AutoEnv.get_env_class("echo")
-            
+
             assert result is mock_client_class
             mock_env_info.get_client_class.assert_called_once()
 
     def test_get_env_class_not_found(self, mock_discovery):
         """Test getting unknown environment raises ValueError."""
         mock_discovery.get_environment_by_name.return_value = None
-        
-        with patch('openenv.auto.auto_env.get_discovery', return_value=mock_discovery):
+
+        with patch("openenv.auto.auto_env.get_discovery", return_value=mock_discovery):
             with pytest.raises(ValueError) as exc_info:
                 AutoEnv.get_env_class("nonexistent")
-            
+
             assert "Unknown environment" in str(exc_info.value)
 
-    def test_get_env_class_with_different_name_formats(self, mock_discovery, mock_env_info):
+    def test_get_env_class_with_different_name_formats(
+        self, mock_discovery, mock_env_info
+    ):
         """Test that different name formats resolve correctly."""
-        with patch('openenv.auto.auto_env.get_discovery', return_value=mock_discovery):
+        with patch("openenv.auto.auto_env.get_discovery", return_value=mock_discovery):
             mock_client_class = Mock()
             mock_env_info.get_client_class = Mock(return_value=mock_client_class)
-            
+
             # All these should work
             for name in ["echo", "echo-env", "echo_env"]:
                 mock_discovery.get_environment_by_name.return_value = mock_env_info
@@ -159,11 +161,11 @@ class TestAutoEnvGetEnvInfo:
 
     def test_get_env_info_success(self, mock_discovery, mock_env_info):
         """Test getting environment info successfully."""
-        with patch('openenv.auto.auto_env.get_discovery', return_value=mock_discovery):
+        with patch("openenv.auto.auto_env.get_discovery", return_value=mock_discovery):
             mock_discovery.get_environment_by_name.return_value = mock_env_info
-            
+
             info = AutoEnv.get_env_info("echo")
-            
+
             assert info["env_key"] == "echo"
             assert info["name"] == "echo_env"
             assert info["package"] == "openenv-echo-env"
@@ -178,11 +180,11 @@ class TestAutoEnvGetEnvInfo:
     def test_get_env_info_not_found(self, mock_discovery):
         """Test getting info for unknown environment raises ValueError."""
         mock_discovery.get_environment_by_name.return_value = None
-        
-        with patch('openenv.auto.auto_env.get_discovery', return_value=mock_discovery):
+
+        with patch("openenv.auto.auto_env.get_discovery", return_value=mock_discovery):
             with pytest.raises(ValueError) as exc_info:
                 AutoEnv.get_env_info("nonexistent")
-            
+
             assert "Unknown environment" in str(exc_info.value)
 
 
@@ -191,9 +193,9 @@ class TestAutoEnvListEnvironments:
 
     def test_list_environments(self, mock_discovery, capsys):
         """Test listing environments prints formatted output."""
-        with patch('openenv.auto.auto_env.get_discovery', return_value=mock_discovery):
+        with patch("openenv.auto.auto_env.get_discovery", return_value=mock_discovery):
             AutoEnv.list_environments()
-        
+
         captured = capsys.readouterr()
         # Should call discovery.list_environments()
         mock_discovery.list_environments.assert_called_once()
@@ -209,11 +211,11 @@ class TestAutoEnvFromName:
             "echo": Mock(),
             "coding": Mock(),
         }
-        
-        with patch('openenv.auto.auto_env.get_discovery', return_value=mock_discovery):
+
+        with patch("openenv.auto.auto_env.get_discovery", return_value=mock_discovery):
             with pytest.raises(ValueError) as exc_info:
                 AutoEnv.from_hub("ech")  # Close to "echo"
-            
+
             error_msg = str(exc_info.value)
             assert "Unknown environment" in error_msg or "ech" in error_msg
             # Should suggest similar names
@@ -223,11 +225,11 @@ class TestAutoEnvFromName:
         """Test error message when no environments are installed."""
         mock_discovery.get_environment_by_name.return_value = None
         mock_discovery.discover.return_value = {}
-        
-        with patch('openenv.auto.auto_env.get_discovery', return_value=mock_discovery):
+
+        with patch("openenv.auto.auto_env.get_discovery", return_value=mock_discovery):
             with pytest.raises(ValueError) as exc_info:
                 AutoEnv.from_hub("anyenv")
-            
+
             error_msg = str(exc_info.value)
             assert "No OpenEnv environments found" in error_msg
             assert "pip install" in error_msg
@@ -235,21 +237,24 @@ class TestAutoEnvFromName:
     def test_from_hub_with_base_url(self, mock_discovery, mock_env_info):
         """Test from_hub with explicit base_url."""
         mock_discovery.get_environment_by_name.return_value = mock_env_info
-        
+
         # Mock the client class
         mock_client_class = Mock()
         mock_client_instance = Mock()
         mock_client_class.return_value = mock_client_instance
         mock_env_info.get_client_class = Mock(return_value=mock_client_class)
-        
-        with patch('openenv.auto.auto_env.get_discovery', return_value=mock_discovery):
-            result = AutoEnv.from_hub("echo", base_url="http://localhost:8000")
-            
-            assert result is mock_client_instance
-            mock_client_class.assert_called_once_with(
-                base_url="http://localhost:8000",
-                provider=None
-            )
+
+        with patch("openenv.auto.auto_env.get_discovery", return_value=mock_discovery):
+            with patch(
+                "openenv.auto.auto_env.AutoEnv._check_server_availability",
+                return_value=True,
+            ):
+                result = AutoEnv.from_hub("echo", base_url="http://localhost:8000")
+
+                assert result is mock_client_instance
+                mock_client_class.assert_called_once_with(
+                    base_url="http://localhost:8000", provider=None
+                )
 
 
 class TestAutoEnvHubDetection:
@@ -262,7 +267,9 @@ class TestAutoEnvHubDetection:
 
     def test_resolve_space_url_from_full_url(self):
         """Test resolving from full HuggingFace URL."""
-        url = AutoEnv._resolve_space_url("https://huggingface.co/wukaixingxp/coding-env-test")
+        url = AutoEnv._resolve_space_url(
+            "https://huggingface.co/wukaixingxp/coding-env-test"
+        )
         assert url == "https://wukaixingxp-coding-env-test.hf.space"
 
 
@@ -278,7 +285,7 @@ class TestAutoActionInstantiation:
         """AutoAction should raise TypeError when instantiated directly."""
         with pytest.raises(TypeError) as exc_info:
             AutoAction()
-        
+
         assert "factory class" in str(exc_info.value).lower()
         assert "AutoAction.from_hub()" in str(exc_info.value)
 
@@ -288,15 +295,17 @@ class TestAutoActionFromName:
 
     def test_from_hub_success(self, mock_discovery, mock_env_info):
         """Test getting action class successfully."""
-        with patch('openenv.auto.auto_action.get_discovery', return_value=mock_discovery):
+        with patch(
+            "openenv.auto.auto_action.get_discovery", return_value=mock_discovery
+        ):
             mock_discovery.get_environment_by_name.return_value = mock_env_info
-            
+
             # Mock the action class
             mock_action_class = Mock()
             mock_env_info.get_action_class = Mock(return_value=mock_action_class)
-            
+
             result = AutoAction.from_hub("echo")
-            
+
             assert result is mock_action_class
             mock_env_info.get_action_class.assert_called_once()
 
@@ -304,11 +313,13 @@ class TestAutoActionFromName:
         """Test getting unknown action raises ValueError."""
         mock_discovery.get_environment_by_name.return_value = None
         mock_discovery.discover.return_value = {}
-        
-        with patch('openenv.auto.auto_action.get_discovery', return_value=mock_discovery):
+
+        with patch(
+            "openenv.auto.auto_action.get_discovery", return_value=mock_discovery
+        ):
             with pytest.raises(ValueError) as exc_info:
                 AutoAction.from_hub("nonexistent")
-            
+
             error_msg = str(exc_info.value)
             assert "No OpenEnv environments found" in error_msg
 
@@ -319,20 +330,24 @@ class TestAutoActionFromName:
             "echo": Mock(),
             "coding": Mock(),
         }
-        
-        with patch('openenv.auto.auto_action.get_discovery', return_value=mock_discovery):
+
+        with patch(
+            "openenv.auto.auto_action.get_discovery", return_value=mock_discovery
+        ):
             with pytest.raises(ValueError) as exc_info:
                 AutoAction.from_hub("ech")  # Close to "echo"
-            
+
             error_msg = str(exc_info.value)
             assert "Unknown environment" in error_msg or "ech" in error_msg
 
     def test_from_hub_with_different_formats(self, mock_discovery, mock_env_info):
         """Test that different name formats work."""
-        with patch('openenv.auto.auto_action.get_discovery', return_value=mock_discovery):
+        with patch(
+            "openenv.auto.auto_action.get_discovery", return_value=mock_discovery
+        ):
             mock_action_class = Mock()
             mock_env_info.get_action_class = Mock(return_value=mock_action_class)
-            
+
             # All these should work
             for name in ["echo", "echo-env", "echo_env"]:
                 mock_discovery.get_environment_by_name.return_value = mock_env_info
@@ -345,14 +360,16 @@ class TestAutoActionFromEnv:
 
     def test_from_env_is_alias(self, mock_discovery, mock_env_info):
         """Test that from_env is an alias for from_hub."""
-        with patch('openenv.auto.auto_action.get_discovery', return_value=mock_discovery):
+        with patch(
+            "openenv.auto.auto_action.get_discovery", return_value=mock_discovery
+        ):
             mock_discovery.get_environment_by_name.return_value = mock_env_info
-            
+
             mock_action_class = Mock()
             mock_env_info.get_action_class = Mock(return_value=mock_action_class)
-            
+
             result = AutoAction.from_env("echo")
-            
+
             assert result is mock_action_class
 
 
@@ -361,11 +378,13 @@ class TestAutoActionGetActionInfo:
 
     def test_get_action_info_success(self, mock_discovery, mock_env_info):
         """Test getting action info successfully."""
-        with patch('openenv.auto.auto_action.get_discovery', return_value=mock_discovery):
+        with patch(
+            "openenv.auto.auto_action.get_discovery", return_value=mock_discovery
+        ):
             mock_discovery.get_environment_by_name.return_value = mock_env_info
-            
+
             info = AutoAction.get_action_info("echo")
-            
+
             assert info["env_key"] == "echo"
             assert info["env_name"] == "echo_env"
             assert info["package"] == "openenv-echo-env"
@@ -373,40 +392,50 @@ class TestAutoActionGetActionInfo:
             assert info["observation_class"] == "EchoObservation"
             assert info["module"] == "echo_env.client"
 
-    def test_get_action_info_with_custom_names(self, mock_discovery, mock_coding_env_info):
+    def test_get_action_info_with_custom_names(
+        self, mock_discovery, mock_coding_env_info
+    ):
         """Test getting action info with custom class names."""
-        with patch('openenv.auto.auto_action.get_discovery', return_value=mock_discovery):
+        with patch(
+            "openenv.auto.auto_action.get_discovery", return_value=mock_discovery
+        ):
             mock_discovery.get_environment_by_name.return_value = mock_coding_env_info
-            
+
             info = AutoAction.get_action_info("coding")
-            
+
             assert info["action_class"] == "CodeAction"
             assert info["observation_class"] == "CodeObservation"
 
     def test_get_action_info_not_found(self, mock_discovery):
         """Test getting info for unknown environment raises ValueError."""
         mock_discovery.get_environment_by_name.return_value = None
-        
-        with patch('openenv.auto.auto_action.get_discovery', return_value=mock_discovery):
+
+        with patch(
+            "openenv.auto.auto_action.get_discovery", return_value=mock_discovery
+        ):
             with pytest.raises(ValueError) as exc_info:
                 AutoAction.get_action_info("nonexistent")
-            
+
             assert "Unknown environment" in str(exc_info.value)
 
 
 class TestAutoActionListActions:
     """Test AutoAction.list_actions() method."""
 
-    def test_list_actions_with_envs(self, mock_discovery, mock_env_info, mock_coding_env_info, capsys):
+    def test_list_actions_with_envs(
+        self, mock_discovery, mock_env_info, mock_coding_env_info, capsys
+    ):
         """Test listing actions prints formatted output."""
         mock_discovery.discover.return_value = {
             "echo": mock_env_info,
             "coding": mock_coding_env_info,
         }
-        
-        with patch('openenv.auto.auto_action.get_discovery', return_value=mock_discovery):
+
+        with patch(
+            "openenv.auto.auto_action.get_discovery", return_value=mock_discovery
+        ):
             AutoAction.list_actions()
-        
+
         captured = capsys.readouterr()
         assert "Available Action Classes" in captured.out
         assert "echo" in captured.out
@@ -418,10 +447,12 @@ class TestAutoActionListActions:
     def test_list_actions_empty(self, mock_discovery, capsys):
         """Test listing when no environments are found."""
         mock_discovery.discover.return_value = {}
-        
-        with patch('openenv.auto.auto_action.get_discovery', return_value=mock_discovery):
+
+        with patch(
+            "openenv.auto.auto_action.get_discovery", return_value=mock_discovery
+        ):
             AutoAction.list_actions()
-        
+
         captured = capsys.readouterr()
         assert "No OpenEnv environments found" in captured.out
         assert "pip install openenv-" in captured.out
@@ -488,34 +519,40 @@ class TestAutoEnvAutoActionIntegration:
 
     def test_same_env_resolves_consistently(self, mock_discovery, mock_env_info):
         """Test that AutoEnv and AutoAction resolve the same environment."""
-        with patch('openenv.auto.auto_env.get_discovery', return_value=mock_discovery), \
-             patch('openenv.auto.auto_action.get_discovery', return_value=mock_discovery):
-            
+        with (
+            patch("openenv.auto.auto_env.get_discovery", return_value=mock_discovery),
+            patch(
+                "openenv.auto.auto_action.get_discovery", return_value=mock_discovery
+            ),
+        ):
             mock_discovery.get_environment_by_name.return_value = mock_env_info
-            
+
             # Mock classes
             mock_client_class = Mock()
             mock_action_class = Mock()
             mock_env_info.get_client_class = Mock(return_value=mock_client_class)
             mock_env_info.get_action_class = Mock(return_value=mock_action_class)
-            
+
             env_class = AutoEnv.get_env_class("echo")
             action_class = AutoAction.from_hub("echo")
-            
+
             # Both should resolve from the same env_info
             assert env_class is mock_client_class
             assert action_class is mock_action_class
 
     def test_env_info_matches_action_info(self, mock_discovery, mock_env_info):
         """Test that env info and action info are consistent."""
-        with patch('openenv.auto.auto_env.get_discovery', return_value=mock_discovery), \
-             patch('openenv.auto.auto_action.get_discovery', return_value=mock_discovery):
-            
+        with (
+            patch("openenv.auto.auto_env.get_discovery", return_value=mock_discovery),
+            patch(
+                "openenv.auto.auto_action.get_discovery", return_value=mock_discovery
+            ),
+        ):
             mock_discovery.get_environment_by_name.return_value = mock_env_info
-            
+
             env_info = AutoEnv.get_env_info("echo")
             action_info = AutoAction.get_action_info("echo")
-            
+
             # Should have consistent information
             assert env_info["action_class"] == action_info["action_class"]
             assert env_info["observation_class"] == action_info["observation_class"]
@@ -533,12 +570,14 @@ class TestErrorHandling:
     def test_import_error_handling(self, mock_discovery, mock_env_info):
         """Test handling of import errors when loading classes."""
         mock_discovery.get_environment_by_name.return_value = mock_env_info
-        mock_env_info.get_client_class = Mock(side_effect=ImportError("Module not found"))
-        
-        with patch('openenv.auto.auto_env.get_discovery', return_value=mock_discovery):
+        mock_env_info.get_client_class = Mock(
+            side_effect=ImportError("Module not found")
+        )
+
+        with patch("openenv.auto.auto_env.get_discovery", return_value=mock_discovery):
             with pytest.raises(ImportError) as exc_info:
                 AutoEnv.from_hub("echo", base_url="http://localhost:8000")
-            
+
             error_msg = str(exc_info.value)
             assert "Failed to import" in error_msg
             assert "pip install" in error_msg or "reinstall" in error_msg
@@ -546,12 +585,16 @@ class TestErrorHandling:
     def test_action_import_error_handling(self, mock_discovery, mock_env_info):
         """Test handling of import errors when loading action classes."""
         mock_discovery.get_environment_by_name.return_value = mock_env_info
-        mock_env_info.get_action_class = Mock(side_effect=ImportError("Module not found"))
-        
-        with patch('openenv.auto.auto_action.get_discovery', return_value=mock_discovery):
+        mock_env_info.get_action_class = Mock(
+            side_effect=ImportError("Module not found")
+        )
+
+        with patch(
+            "openenv.auto.auto_action.get_discovery", return_value=mock_discovery
+        ):
             with pytest.raises(ImportError) as exc_info:
                 AutoAction.from_hub("echo")
-            
+
             error_msg = str(exc_info.value)
             assert "Failed to import" in error_msg
 
@@ -559,18 +602,21 @@ class TestErrorHandling:
 class TestNameVariations:
     """Test various name format variations work correctly."""
 
-    @pytest.mark.parametrize("name,expected_key", [
-        ("echo", "echo"),
-        ("echo-env", "echo"),
-        ("echo_env", "echo"),
-        ("coding", "coding"),
-        ("coding-env", "coding"),
-        ("coding_env", "coding"),
-        ("browser-gym", "browser_gym"),
-        ("browser_gym", "browser_gym"),
-        ("sumo-rl", "sumo_rl"),
-        ("sumo_rl", "sumo_rl"),
-    ])
+    @pytest.mark.parametrize(
+        "name,expected_key",
+        [
+            ("echo", "echo"),
+            ("echo-env", "echo"),
+            ("echo_env", "echo"),
+            ("coding", "coding"),
+            ("coding-env", "coding"),
+            ("coding_env", "coding"),
+            ("browser-gym", "browser_gym"),
+            ("browser_gym", "browser_gym"),
+            ("sumo-rl", "sumo_rl"),
+            ("sumo_rl", "sumo_rl"),
+        ],
+    )
     def test_name_normalization_variations(self, name, expected_key):
         """Test that various name formats normalize correctly."""
         normalized = _normalize_env_name(name)
@@ -591,11 +637,11 @@ class TestNameVariations:
 class TestHuggingFaceSpaceIntegration:
     """
     Real integration tests that connect to HuggingFace Spaces.
-    
+
     These tests require:
     - Network access to huggingface.co and *.hf.space
     - The HuggingFace Space to be running and accessible
-    
+
     Run these tests with:
         pytest -m "integration and network" tests/envs/test_auto_env.py -v
     """
@@ -607,7 +653,7 @@ class TestHuggingFaceSpaceIntegration:
     def check_space_availability(self):
         """Check if the HuggingFace Space is accessible before running tests."""
         import requests
-        
+
         space_url = AutoEnv._resolve_space_url(self.HF_SPACE_REPO)
         try:
             response = requests.get(f"{space_url}/health", timeout=10)
@@ -619,7 +665,7 @@ class TestHuggingFaceSpaceIntegration:
     def test_connect_to_hf_space(self, check_space_availability):
         """
         Test connecting to a real HuggingFace Space using AutoEnv.
-        
+
         This test:
         1. Connects to wukaixingxp/coding-env-test Space
         2. Resets the environment
@@ -627,16 +673,18 @@ class TestHuggingFaceSpaceIntegration:
         """
         # Connect to HuggingFace Space
         env = AutoEnv.from_hub(self.HF_SPACE_REPO)
-        
+
         try:
             # Reset the environment
             result = env.reset()
-            
+
             # Verify we got a valid result
             assert result is not None
-            assert hasattr(result, 'observation')
-            
-            print(f"✅ Successfully connected to HuggingFace Space: {self.HF_SPACE_REPO}")
+            assert hasattr(result, "observation")
+
+            print(
+                f"✅ Successfully connected to HuggingFace Space: {self.HF_SPACE_REPO}"
+            )
             print(f"   Reset observation: {result.observation}")
         finally:
             # Clean up
@@ -645,7 +693,7 @@ class TestHuggingFaceSpaceIntegration:
     def test_execute_action_on_hf_space(self, check_space_availability):
         """
         Test executing an action on a real HuggingFace Space.
-        
+
         This test:
         1. Connects to wukaixingxp/coding-env-test Space
         2. Gets the action class using AutoAction
@@ -654,30 +702,30 @@ class TestHuggingFaceSpaceIntegration:
         """
         # Connect to HuggingFace Space
         env = AutoEnv.from_hub(self.HF_SPACE_REPO)
-        
+
         try:
             # Reset the environment
             env.reset()
-            
+
             # Get action class using AutoAction
             CodeAction = AutoAction.from_hub(self.HF_SPACE_REPO)
-            
+
             # Create and execute action
             action = CodeAction(code="print('Hello from pytest!')")
             result = env.step(action)
-            
+
             # Verify the result
             assert result is not None
-            assert hasattr(result, 'observation')
-            assert hasattr(result, 'reward')
-            assert hasattr(result, 'done')
-            
+            assert hasattr(result, "observation")
+            assert hasattr(result, "reward")
+            assert hasattr(result, "done")
+
             # Check if stdout contains our message
-            if hasattr(result.observation, 'stdout'):
+            if hasattr(result.observation, "stdout"):
                 assert "Hello from pytest!" in result.observation.stdout
                 print(f"✅ Code execution successful!")
                 print(f"   stdout: {result.observation.stdout}")
-            
+
             print(f"   reward: {result.reward}")
             print(f"   done: {result.done}")
         finally:
@@ -687,25 +735,25 @@ class TestHuggingFaceSpaceIntegration:
     def test_autoenv_and_autoaction_same_space(self, check_space_availability):
         """
         Test that AutoEnv and AutoAction work together seamlessly.
-        
+
         Verifies that calling both with the same HF Space repo ID
         doesn't cause duplicate downloads or installations.
         """
         # First call - AutoEnv
         env = AutoEnv.from_hub(self.HF_SPACE_REPO)
-        
+
         try:
             # Second call - AutoAction (should use cached package)
             ActionClass = AutoAction.from_hub(self.HF_SPACE_REPO)
-            
+
             # Verify both work
             result = env.reset()
             assert result is not None
-            
+
             # Create an action instance
             action = ActionClass(code="x = 1 + 1")
             step_result = env.step(action)
-            
+
             assert step_result is not None
             print(f"✅ AutoEnv and AutoAction work together correctly")
         finally:
@@ -714,10 +762,10 @@ class TestHuggingFaceSpaceIntegration:
     def test_space_availability_check(self):
         """Test the Space availability check functionality."""
         import requests
-        
+
         # Test with real Space URL
         space_url = AutoEnv._resolve_space_url(self.HF_SPACE_REPO)
-        
+
         # Check availability (this is a real network call)
         try:
             is_available = AutoEnv._check_space_availability(space_url, timeout=10.0)
@@ -739,14 +787,14 @@ class TestHuggingFaceSpaceIntegration:
 class TestDockerIntegration:
     """
     Real integration tests that start Docker containers.
-    
+
     These tests require:
     - Docker to be installed and running
     - Docker images to be built (e.g., echo-env:latest)
-    
+
     Build the Docker image first:
         cd src/envs/echo_env/server && docker build -t echo-env:latest .
-    
+
     Run these tests with:
         pytest -m "integration and docker" tests/envs/test_auto_env.py -v
     """
@@ -756,18 +804,14 @@ class TestDockerIntegration:
         """Check if Docker is available and the required image exists."""
         import subprocess
         import shutil
-        
+
         # Check if docker command exists
         if not shutil.which("docker"):
             pytest.skip("Docker is not installed")
-        
+
         # Check if Docker daemon is running
         try:
-            result = subprocess.run(
-                ["docker", "info"],
-                capture_output=True,
-                timeout=10
-            )
+            result = subprocess.run(["docker", "info"], capture_output=True, timeout=10)
             if result.returncode != 0:
                 pytest.skip("Docker daemon is not running")
         except subprocess.TimeoutExpired:
@@ -779,13 +823,13 @@ class TestDockerIntegration:
     def check_echo_env_image(self, check_docker_available):
         """Check if the echo-env Docker image is available."""
         import subprocess
-        
+
         result = subprocess.run(
             ["docker", "images", "-q", "echo-env:latest"],
             capture_output=True,
-            text=True
+            text=True,
         )
-        
+
         if not result.stdout.strip():
             pytest.skip(
                 "Docker image 'echo-env:latest' not found. "
@@ -795,7 +839,7 @@ class TestDockerIntegration:
     def test_autoenv_with_docker_echo_env(self, check_echo_env_image):
         """
         Test AutoEnv with a real Docker container (echo-env).
-        
+
         This test:
         1. Starts an echo-env Docker container using AutoEnv
         2. Sends a message
@@ -803,28 +847,28 @@ class TestDockerIntegration:
         4. Cleans up the container
         """
         from envs.echo_env.models import EchoAction
-        
+
         # Start Docker container using AutoEnv
         env = AutoEnv.from_hub("echo", docker_image="echo-env:latest")
-        
+
         try:
             # Reset the environment
             result = env.reset()
             assert result is not None
-            assert hasattr(result, 'observation')
-            
+            assert hasattr(result, "observation")
+
             print(f"✅ Docker container started successfully")
             print(f"   Reset observation: {result.observation}")
-            
+
             # Send a message
             action = EchoAction(message="Hello from Docker test!")
             step_result = env.step(action)
-            
+
             # Verify the echo
             assert step_result is not None
-            assert hasattr(step_result.observation, 'echoed_message')
+            assert hasattr(step_result.observation, "echoed_message")
             assert "Hello from Docker test!" in step_result.observation.echoed_message
-            
+
             print(f"✅ Message echoed successfully")
             print(f"   echoed_message: {step_result.observation.echoed_message}")
         finally:
@@ -834,27 +878,30 @@ class TestDockerIntegration:
     def test_autoaction_with_docker_echo_env(self, check_echo_env_image):
         """
         Test AutoAction with a real Docker container (echo-env).
-        
+
         This test uses AutoAction to get the action class dynamically.
         """
         # Get the action class using AutoAction
         EchoAction = AutoAction.from_hub("echo")
-        
+
         # Start Docker container using AutoEnv
         env = AutoEnv.from_hub("echo", docker_image="echo-env:latest")
-        
+
         try:
             # Reset
             env.reset()
-            
+
             # Create action using the dynamically loaded class
             action = EchoAction(message="Dynamic action from AutoAction!")
             step_result = env.step(action)
-            
+
             # Verify
             assert step_result is not None
-            assert "Dynamic action from AutoAction!" in step_result.observation.echoed_message
-            
+            assert (
+                "Dynamic action from AutoAction!"
+                in step_result.observation.echoed_message
+            )
+
             print(f"✅ AutoAction with Docker works correctly")
         finally:
             env.close()
@@ -863,11 +910,11 @@ class TestDockerIntegration:
         """Test getting environment info for a Docker-based environment."""
         try:
             info = AutoEnv.get_env_info("echo")
-            
+
             assert info is not None
             assert info["env_key"] == "echo"
             assert info["default_image"] == "echo-env:latest"
-            
+
             print(f"✅ Environment info retrieved successfully")
             print(f"   env_key: {info['env_key']}")
             print(f"   default_image: {info['default_image']}")
@@ -886,12 +933,12 @@ class TestDockerIntegration:
 class TestLocalServerIntegration:
     """
     Integration tests that connect to a locally running server.
-    
+
     These tests require a server to be running on localhost.
-    
+
     Start a server first:
         cd src && python -m envs.echo_env.server.app
-    
+
     Run these tests with:
         pytest -m integration tests/envs/test_auto_env.py::TestLocalServerIntegration -v
     """
@@ -900,7 +947,7 @@ class TestLocalServerIntegration:
     def local_echo_server(self):
         """Check if local echo server is running."""
         import requests
-        
+
         base_url = "http://localhost:8000"
         try:
             response = requests.get(f"{base_url}/health", timeout=5)
@@ -916,7 +963,7 @@ class TestLocalServerIntegration:
     def test_autoenv_with_local_server(self, local_echo_server):
         """
         Test AutoEnv connecting to a local server using base_url.
-        
+
         This test:
         1. Connects to localhost:8000 using AutoEnv
         2. Resets the environment
@@ -925,24 +972,24 @@ class TestLocalServerIntegration:
         """
         # Connect to local server
         env = AutoEnv.from_hub("echo", base_url=local_echo_server)
-        
+
         try:
             # Reset
             result = env.reset()
             assert result is not None
-            
+
             print(f"✅ Connected to local server at {local_echo_server}")
-            
+
             # Get action class
             EchoAction = AutoAction.from_hub("echo")
-            
+
             # Send message
             action = EchoAction(message="Hello local server!")
             step_result = env.step(action)
-            
+
             assert step_result is not None
             assert "Hello local server!" in step_result.observation.echoed_message
-            
+
             print(f"✅ Local server test passed")
             print(f"   echoed_message: {step_result.observation.echoed_message}")
         finally:
@@ -952,19 +999,21 @@ class TestLocalServerIntegration:
         """Test multiple steps on local server."""
         env = AutoEnv.from_hub("echo", base_url=local_echo_server)
         EchoAction = AutoAction.from_hub("echo")
-        
+
         try:
             env.reset()
-            
+
             messages = ["First message", "Second message", "Third message"]
-            
+
             for i, msg in enumerate(messages):
                 action = EchoAction(message=msg)
                 result = env.step(action)
-                
+
                 assert msg in result.observation.echoed_message
-                print(f"✅ Step {i+1}: '{msg}' → '{result.observation.echoed_message}'")
-            
+                print(
+                    f"✅ Step {i + 1}: '{msg}' → '{result.observation.echoed_message}'"
+                )
+
             print(f"✅ Multiple steps test passed ({len(messages)} steps)")
         finally:
             env.close()

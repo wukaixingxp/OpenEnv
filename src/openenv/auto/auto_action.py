@@ -76,7 +76,7 @@ class AutoAction:
         """AutoAction should not be instantiated directly. Use class methods instead."""
         raise TypeError(
             "AutoAction is a factory class and should not be instantiated directly. "
-            "Use AutoAction.from_env() instead."
+            "Use AutoAction.from_hub() or AutoAction.from_env() instead."
         )
 
     @classmethod

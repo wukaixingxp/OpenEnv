@@ -107,7 +107,11 @@ class EnvClient(ABC, Generic[ActT, ObsT, StateT]):
             # Set NO_PROXY to bypass proxy for localhost
             current_no_proxy = old_no_proxy or ""
             if "localhost" not in current_no_proxy.lower():
-                os.environ["NO_PROXY"] = f"{current_no_proxy},localhost,127.0.0.1" if current_no_proxy else "localhost,127.0.0.1"
+                os.environ["NO_PROXY"] = (
+                    f"{current_no_proxy},localhost,127.0.0.1"
+                    if current_no_proxy
+                    else "localhost,127.0.0.1"
+                )
 
         try:
             self._ws = ws_connect(

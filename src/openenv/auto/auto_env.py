@@ -396,6 +396,7 @@ class AutoEnv:
             # Also need to invalidate importlib.metadata cache after pip install
             try:
                 import importlib.metadata
+
                 if hasattr(importlib.metadata, "distributions"):
                     # Force cache invalidation by reimporting distributions
                     importlib.invalidate_caches()

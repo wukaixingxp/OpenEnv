@@ -504,7 +504,7 @@ class AutoEnv:
                 raise ValueError(
                     f"No OpenEnv environments found.\n"
                     f"Install an environment with: pip install openenv-<env-name>\n"
-                    f"Or specify a HuggingFace Hub repository: AutoEnv.from_env('org/repo')"
+                    f"Or specify a HuggingFace Hub repository: AutoEnv.from_env('openenv/echo_env')"
                 )
 
             # Try to suggest similar environment names

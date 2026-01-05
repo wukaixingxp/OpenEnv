@@ -17,20 +17,21 @@ Tests cover:
 6. Integration with the discovery system
 """
 
-import pytest
-from unittest.mock import Mock, patch, MagicMock
 from typing import Type
+from unittest.mock import MagicMock, Mock, patch
 
-from openenv.auto.auto_env import AutoEnv
-from openenv.auto.auto_action import AutoAction
+import pytest
 from openenv.auto._discovery import (
-    EnvironmentInfo,
+    _is_hub_url,
+    _normalize_env_name,
     EnvironmentDiscovery,
+    EnvironmentInfo,
     get_discovery,
     reset_discovery,
-    _normalize_env_name,
-    _is_hub_url,
 )
+from openenv.auto.auto_action import AutoAction
+
+from openenv.auto.auto_env import AutoEnv
 
 
 # ============================================================================
@@ -647,7 +648,7 @@ class TestHuggingFaceSpaceIntegration:
     """
 
     # Test Space URL - this is a real HuggingFace Space
-    HF_SPACE_REPO = "wukaixingxp/coding-env-test"
+    HF_SPACE_REPO = "openenv/coding_env"
 
     @pytest.fixture
     def check_space_availability(self):
@@ -802,8 +803,8 @@ class TestDockerIntegration:
     @pytest.fixture
     def check_docker_available(self):
         """Check if Docker is available and the required image exists."""
-        import subprocess
         import shutil
+        import subprocess
 
         # Check if docker command exists
         if not shutil.which("docker"):

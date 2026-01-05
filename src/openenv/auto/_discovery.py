@@ -359,6 +359,9 @@ class EnvironmentDiscovery:
         """
         environments = {}
 
+        # Invalidate import caches to ensure we pick up newly installed packages
+        importlib.invalidate_caches()
+
         # Get all installed packages
         try:
             distributions = importlib.metadata.distributions()

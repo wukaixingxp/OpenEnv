@@ -393,7 +393,16 @@ class AutoEnv:
             logger.info(f"📦 Package not found, installing: {package_name}")
             cls._install_from_path(env_path)
             # Clear discovery cache to pick up the newly installed package
+            # Also need to invalidate importlib.metadata cache after pip install
+            try:
+                import importlib.metadata
+                if hasattr(importlib.metadata, "distributions"):
+                    # Force cache invalidation by reimporting distributions
+                    importlib.invalidate_caches()
+            except Exception:
+                pass
             get_discovery().clear_cache()
+            get_discovery().discover(use_cache=False)
 
         # Extract environment name from package name
         # "openenv-coding_env" -> "coding_env"

@@ -224,8 +224,52 @@ The system automatically:
 1. Detects HuggingFace repo IDs (format: `username/repo-name`)
 2. Resolves the Space URL (e.g., `https://username-repo-name.hf.space`)
 3. Checks if the Space is running and accessible
-4. Downloads the environment package if needed
+4. Installs the environment package using `git+` URL (prompts for confirmation)
 5. Connects to the running Space
+
+### Security: Remote Code Installation
+
+When loading environments from HuggingFace Hub, AutoEnv needs to install Python code from the remote repository. Since this executes code from the internet, AutoEnv will prompt for confirmation before installing:
+
+```
+============================================================
+SECURITY WARNING: Remote Code Installation
+============================================================
+You are about to install code from a remote repository:
+  Repository: username/coding-env-test
+  Source: https://huggingface.co/spaces/username/coding-env-test
+
+This will execute code from the internet on your machine.
+Only proceed if you trust the source.
+============================================================
+
+Do you want to proceed? [y/N]:
+```
+
+To skip the confirmation prompt, you can either:
+
+1. **Use the `trust_remote_code` parameter:**
+   ```python
+   env = AutoEnv.from_env("username/coding-env", trust_remote_code=True)
+   ```
+
+2. **Set the environment variable:**
+   ```bash
+   export OPENENV_TRUST_REMOTE_CODE=1
+   python your_script.py
+   ```
+
+### Package Installation
+
+AutoEnv uses `uv pip` if available, otherwise falls back to standard `pip`. This ensures compatibility with different Python environments:
+
+```bash
+# If uv is installed, AutoEnv uses:
+uv pip install git+https://huggingface.co/spaces/username/coding-env
+
+# Otherwise, it uses:
+pip install git+https://huggingface.co/spaces/username/coding-env
+```
 
 ## Complete Workflow Example
 

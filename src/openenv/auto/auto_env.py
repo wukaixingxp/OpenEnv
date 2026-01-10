@@ -33,8 +33,9 @@ from __future__ import annotations
 import importlib
 import logging
 import os
+import shutil
 import subprocess
-import tempfile
+import sys
 import requests
 from pathlib import Path
 from typing import Any, Optional, TYPE_CHECKING, Dict
@@ -49,6 +50,69 @@ logger = logging.getLogger(__name__)
 
 # Cache for repo ID → env_name mapping to avoid redundant downloads
 _hub_env_name_cache: Dict[str, str] = {}
+
+# Environment variable to skip user confirmation for remote installs
+OPENENV_TRUST_REMOTE_CODE = "OPENENV_TRUST_REMOTE_CODE"
+
+
+def _has_uv() -> bool:
+    """Check if uv is available in the system."""
+    return shutil.which("uv") is not None
+
+
+def _get_pip_command() -> list[str]:
+    """
+    Get the appropriate pip command (uv pip or pip).
+
+    Returns:
+        List of command parts for pip installation
+    """
+    if _has_uv():
+        return ["uv", "pip"]
+    return [sys.executable, "-m", "pip"]
+
+
+def _confirm_remote_install(repo_id: str) -> bool:
+    """
+    Ask user for confirmation before installing remote code.
+
+    This is a security measure since we're executing code from the internet.
+
+    Args:
+        repo_id: The HuggingFace repo ID being installed
+
+    Returns:
+        True if user confirms, False otherwise
+    """
+    # Check environment variable for automated/CI environments
+    if os.environ.get(OPENENV_TRUST_REMOTE_CODE, "").lower() in ("1", "true", "yes"):
+        logger.info(f"Skipping confirmation (OPENENV_TRUST_REMOTE_CODE is set)")
+        return True
+
+    # Check if we're in an interactive terminal
+    if not sys.stdin.isatty():
+        logger.warning(
+            f"Cannot prompt for confirmation in non-interactive mode. "
+            f"Set OPENENV_TRUST_REMOTE_CODE=1 to allow remote installs."
+        )
+        return False
+
+    print(f"\n{'='*60}")
+    print(f"⚠️  SECURITY WARNING: Remote Code Installation")
+    print(f"{'='*60}")
+    print(f"You are about to install code from a remote repository:")
+    print(f"  Repository: {repo_id}")
+    print(f"  Source: https://huggingface.co/spaces/{repo_id}")
+    print(f"\nThis will execute code from the internet on your machine.")
+    print(f"Only proceed if you trust the source.")
+    print(f"{'='*60}\n")
+
+    try:
+        response = input("Do you want to proceed? [y/N]: ").strip().lower()
+        return response in ("y", "yes")
+    except (EOFError, KeyboardInterrupt):
+        print("\nInstallation cancelled.")
+        return False
 
 
 class AutoEnv:
@@ -206,6 +270,9 @@ class AutoEnv:
         """
         Download environment from HuggingFace Hub.
 
+        Note: This method is deprecated. Use _install_from_hub() instead which
+        uses git+ URLs for direct installation without downloading.
+
         Args:
             repo_id: HuggingFace repo ID (e.g., "meta-pytorch/coding-env")
             cache_dir: Optional cache directory
@@ -237,6 +304,7 @@ class AutoEnv:
 
         try:
             # Download to cache
+            import tempfile
             env_path = snapshot_download(
                 repo_id=repo_id,
                 cache_dir=cache_dir
@@ -252,9 +320,109 @@ class AutoEnv:
             ) from e
 
     @classmethod
+    def _get_hub_git_url(cls, repo_id: str) -> str:
+        """
+        Get the git URL for a HuggingFace Space.
+
+        Args:
+            repo_id: HuggingFace repo ID (e.g., "wukaixingxp/coding-env-test")
+
+        Returns:
+            Git URL for pip installation (e.g., "git+https://huggingface.co/spaces/wukaixingxp/coding-env-test")
+        """
+        # Clean up repo_id if it's a full URL
+        if "huggingface.co" in repo_id:
+            parts = repo_id.split("/")
+            if len(parts) >= 2:
+                repo_id = f"{parts[-2]}/{parts[-1]}"
+
+        return f"git+https://huggingface.co/spaces/{repo_id}"
+
+    @classmethod
+    def _install_from_hub(cls, repo_id: str, trust_remote_code: bool = False) -> str:
+        """
+        Install environment package directly from HuggingFace Hub using git+.
+
+        This is the preferred method as it avoids downloading the entire repo
+        and uses pip/uv's native git support.
+
+        Args:
+            repo_id: HuggingFace repo ID (e.g., "wukaixingxp/coding-env-test")
+            trust_remote_code: If True, skip user confirmation
+
+        Returns:
+            Package name that was installed
+
+        Raises:
+            ValueError: If installation fails or user declines
+        """
+        # Security check - confirm with user before installing remote code
+        if not trust_remote_code and not _confirm_remote_install(repo_id):
+            raise ValueError(
+                f"Installation cancelled by user.\n"
+                f"To allow remote installs without prompting, set OPENENV_TRUST_REMOTE_CODE=1"
+            )
+
+        git_url = cls._get_hub_git_url(repo_id)
+        pip_cmd = _get_pip_command()
+        pip_name = "uv pip" if pip_cmd[0] == "uv" else "pip"
+
+        logger.info(f"Installing from HuggingFace Space using {pip_name}: {repo_id}")
+        logger.info(f"Command: {' '.join(pip_cmd)} install {git_url}")
+
+        try:
+            result = subprocess.run(
+                [*pip_cmd, "install", git_url],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+
+            # Try to extract package name from pip output
+            # Look for "Successfully installed <package-name>-<version>"
+            for line in result.stdout.split("\n"):
+                if "Successfully installed" in line:
+                    # Parse package name from the line
+                    parts = line.replace("Successfully installed", "").strip().split()
+                    for part in parts:
+                        if part.startswith("openenv-"):
+                            # Remove version suffix (e.g., "openenv-coding_env-0.1.0" -> "openenv-coding_env")
+                            package_name = "-".join(part.split("-")[:-1]) if "-" in part.rsplit("-", 1)[-1].replace(".", "").isdigit() else part
+                            # Handle version suffix more robustly
+                            if any(c.isdigit() for c in part.split("-")[-1]):
+                                package_name = "-".join(part.rsplit("-", 1)[:-1])
+                            else:
+                                package_name = part
+                            logger.info(f"Successfully installed: {package_name}")
+                            return package_name
+
+            # Fallback: try to determine package name from repo_id
+            # Convention: repo name like "coding-env-test" -> package "openenv-coding_env"
+            env_name = repo_id.split("/")[-1]  # Get repo name from "user/repo"
+            env_name = env_name.replace("-", "_")
+            if not env_name.endswith("_env"):
+                env_name = f"{env_name}_env"
+            package_name = f"openenv-{env_name}"
+
+            logger.info(f"Installed (inferred package name): {package_name}")
+            return package_name
+
+        except subprocess.CalledProcessError as e:
+            error_msg = e.stderr or e.stdout or str(e)
+            raise ValueError(
+                f"Failed to install environment from HuggingFace Space: {repo_id}\n"
+                f"Command: {' '.join(pip_cmd)} install {git_url}\n"
+                f"Error: {error_msg}\n"
+                f"Make sure the repository exists and contains a valid Python package."
+            ) from e
+
+    @classmethod
     def _install_from_path(cls, env_path: Path) -> str:
         """
         Install environment package from a local path.
+
+        Note: This method is deprecated for Hub installs. Use _install_from_hub()
+        instead which uses git+ URLs for direct installation.
 
         Args:
             env_path: Path to environment directory containing pyproject.toml
@@ -270,12 +438,14 @@ class AutoEnv:
                 f"Environment directory does not contain pyproject.toml: {env_path}"
             )
 
-        logger.info(f"Installing environment from: {env_path}")
+        pip_cmd = _get_pip_command()
+        pip_name = "uv pip" if pip_cmd[0] == "uv" else "pip"
+        logger.info(f"Installing environment from {env_path} using {pip_name}")
 
         try:
             # Install in editable mode
             subprocess.run(
-                ["pip", "install", "-e", str(env_path)],
+                [*pip_cmd, "install", "-e", str(env_path)],
                 check=True,
                 capture_output=True,
                 text=True,
@@ -357,15 +527,18 @@ class AutoEnv:
             return False
 
     @classmethod
-    def _ensure_package_from_hub(cls, name: str) -> str:
+    def _ensure_package_from_hub(
+        cls, name: str, trust_remote_code: bool = False
+    ) -> str:
         """
         Ensure package from HuggingFace Hub is installed.
 
-        Only downloads and installs if not already installed.
-        Uses a cache to avoid redundant downloads for the same repo ID.
+        Uses git+ URLs for direct installation without downloading the entire repo.
+        Prompts user for confirmation before installing remote code.
 
         Args:
             name: HuggingFace repo ID (e.g., "wukaixingxp/coding-env-test")
+            trust_remote_code: If True, skip user confirmation
 
         Returns:
             Environment name (e.g., "coding_env")
@@ -375,41 +548,44 @@ class AutoEnv:
         # Check if we already resolved this repo ID
         if name in _hub_env_name_cache:
             env_name = _hub_env_name_cache[name]
-            logger.debug(f"✅ Using cached env name for {name}: {env_name}")
+            logger.debug(f"Using cached env name for {name}: {env_name}")
             return env_name
 
-        # Download and get actual package name from pyproject.toml
-        logger.info(f"📦 Checking package from HuggingFace Space...")
-        package_name, env_path = cls._get_package_name_from_hub(name)
+        # Try to infer expected package name from repo ID
+        # Convention: repo "user/coding-env" -> package "openenv-coding_env"
+        repo_name = name.split("/")[-1] if "/" in name else name
+        expected_env_name = repo_name.replace("-", "_")
+        if not expected_env_name.endswith("_env"):
+            expected_env_name = f"{expected_env_name}_env"
+        expected_package_name = f"openenv-{expected_env_name}"
 
         # Check if already installed
-        if cls._is_package_installed(package_name):
-            logger.info(f"✅ Package already installed: {package_name}")
+        if cls._is_package_installed(expected_package_name):
+            logger.info(f"Package already installed: {expected_package_name}")
             # Clear and refresh discovery cache to make sure it's detected
             get_discovery().clear_cache()
             get_discovery().discover(use_cache=False)
-        else:
-            # Not installed, install it now
-            logger.info(f"📦 Package not found, installing: {package_name}")
-            cls._install_from_path(env_path)
-            # Clear discovery cache to pick up the newly installed package
-            # Also need to invalidate importlib.metadata cache after pip install
-            try:
-                import importlib.metadata
+            # Cache the result
+            _hub_env_name_cache[name] = expected_env_name
+            return expected_env_name
 
-                if hasattr(importlib.metadata, "distributions"):
-                    # Force cache invalidation by reimporting distributions
-                    importlib.invalidate_caches()
-            except Exception:
-                pass
-            get_discovery().clear_cache()
-            get_discovery().discover(use_cache=False)
+        # Not installed, install using git+ URL
+        logger.info(f"Package not found locally, installing from Hub: {name}")
+        package_name = cls._install_from_hub(name, trust_remote_code=trust_remote_code)
+
+        # Clear discovery cache to pick up the newly installed package
+        try:
+            importlib.invalidate_caches()
+        except Exception:
+            pass
+        get_discovery().clear_cache()
+        get_discovery().discover(use_cache=False)
 
         # Extract environment name from package name
         # "openenv-coding_env" -> "coding_env"
         env_name = package_name.replace("openenv-", "").replace("-", "_")
 
-        # Cache the result to avoid redundant downloads
+        # Cache the result to avoid redundant installs
         _hub_env_name_cache[name] = env_name
 
         return env_name
@@ -423,6 +599,7 @@ class AutoEnv:
         container_provider: Optional[ContainerProvider] = None,
         wait_timeout: float = 30.0,
         env_vars: Optional[Dict[str, str]] = None,
+        trust_remote_code: bool = False,
         **kwargs: Any,
     ) -> "EnvClient":
         """
@@ -430,7 +607,7 @@ class AutoEnv:
 
         This method automatically:
         1. Checks if the name is a HuggingFace Hub URL/repo ID
-        2. If Hub: downloads and installs the environment package
+        2. If Hub: installs the environment package using git+ URL
         3. If local: looks up the installed openenv-* package
         4. Imports the client class and instantiates it
 
@@ -445,6 +622,9 @@ class AutoEnv:
             container_provider: Optional container provider
             wait_timeout: Timeout for container startup (seconds)
             env_vars: Optional environment variables for the container
+            trust_remote_code: If True, skip user confirmation when installing
+                from HuggingFace Hub. Can also be set via OPENENV_TRUST_REMOTE_CODE
+                environment variable.
             **kwargs: Additional arguments passed to the client class
 
         Returns:
@@ -480,25 +660,27 @@ class AutoEnv:
 
             if space_is_available and base_url is None:
                 # Space is accessible! We'll connect directly without Docker
-                logger.info(f"✅ Space is accessible at: {space_url}")
-                logger.info(
-                    "📦 Installing package for client code (no Docker needed)..."
-                )
+                logger.info(f"Space is accessible at: {space_url}")
+                logger.info("Installing package for client code (no Docker needed)...")
 
-                # Ensure package is installed (downloads only if needed)
-                env_name = cls._ensure_package_from_hub(name)
+                # Ensure package is installed (uses git+ URL)
+                env_name = cls._ensure_package_from_hub(
+                    name, trust_remote_code=trust_remote_code
+                )
 
                 # Set base_url to connect to remote Space
                 base_url = space_url
-                logger.info(f"🚀 Will connect to remote Space (no local Docker)")
+                logger.info(f"Will connect to remote Space (no local Docker)")
             else:
                 # Space not accessible or user provided explicit base_url
                 if not space_is_available:
-                    logger.info(f"❌ Space not accessible at {space_url}")
-                    logger.info("📦 Falling back to local Docker mode...")
+                    logger.info(f"Space not accessible at {space_url}")
+                    logger.info("Falling back to local Docker mode...")
 
-                # Ensure package is installed (downloads only if needed)
-                env_name = cls._ensure_package_from_hub(name)
+                # Ensure package is installed (uses git+ URL)
+                env_name = cls._ensure_package_from_hub(
+                    name, trust_remote_code=trust_remote_code
+                )
         else:
             env_name = name
 
@@ -601,6 +783,7 @@ class AutoEnv:
         container_provider: Optional["ContainerProvider"] = None,
         wait_timeout: float = 30.0,
         env_vars: Optional[Dict[str, str]] = None,
+        trust_remote_code: bool = False,
         **kwargs: Any,
     ) -> "EnvClient":
         """
@@ -615,6 +798,8 @@ class AutoEnv:
             container_provider: Optional container provider
             wait_timeout: Timeout for container startup (seconds)
             env_vars: Optional environment variables for the container
+            trust_remote_code: If True, skip user confirmation when installing
+                from HuggingFace Hub
             **kwargs: Additional arguments passed to the client class
 
         Returns:
@@ -631,6 +816,7 @@ class AutoEnv:
             container_provider=container_provider,
             wait_timeout=wait_timeout,
             env_vars=env_vars,
+            trust_remote_code=trust_remote_code,
             **kwargs,
         )
 

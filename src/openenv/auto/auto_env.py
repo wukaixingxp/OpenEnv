@@ -97,15 +97,15 @@ def _confirm_remote_install(repo_id: str) -> bool:
         )
         return False
 
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print(f"⚠️  SECURITY WARNING: Remote Code Installation")
-    print(f"{'='*60}")
+    print(f"{'=' * 60}")
     print(f"You are about to install code from a remote repository:")
     print(f"  Repository: {repo_id}")
     print(f"  Source: https://huggingface.co/spaces/{repo_id}")
     print(f"\nThis will execute code from the internet on your machine.")
     print(f"Only proceed if you trust the source.")
-    print(f"{'='*60}\n")
+    print(f"{'=' * 60}\n")
 
     try:
         response = input("Do you want to proceed? [y/N]: ").strip().lower()
@@ -305,6 +305,7 @@ class AutoEnv:
         try:
             # Download to cache
             import tempfile
+
             env_path = snapshot_download(
                 repo_id=repo_id,
                 cache_dir=cache_dir
@@ -387,7 +388,12 @@ class AutoEnv:
                     for part in parts:
                         if part.startswith("openenv-"):
                             # Remove version suffix (e.g., "openenv-coding_env-0.1.0" -> "openenv-coding_env")
-                            package_name = "-".join(part.split("-")[:-1]) if "-" in part.rsplit("-", 1)[-1].replace(".", "").isdigit() else part
+                            package_name = (
+                                "-".join(part.split("-")[:-1])
+                                if "-"
+                                in part.rsplit("-", 1)[-1].replace(".", "").isdigit()
+                                else part
+                            )
                             # Handle version suffix more robustly
                             if any(c.isdigit() for c in part.split("-")[-1]):
                                 package_name = "-".join(part.rsplit("-", 1)[:-1])

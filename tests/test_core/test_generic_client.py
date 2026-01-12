@@ -252,9 +252,7 @@ class TestAutoEnvSkipInstall:
         """Test skip_install=True with explicit base_url."""
         from openenv.auto.auto_env import AutoEnv
 
-        with patch.object(
-            AutoEnv, "_check_server_availability", return_value=True
-        ):
+        with patch.object(AutoEnv, "_check_server_availability", return_value=True):
             client = AutoEnv.from_env(
                 "echo",
                 base_url="http://localhost:8000",
@@ -267,9 +265,7 @@ class TestAutoEnvSkipInstall:
         """Test skip_install=True with unavailable server raises error."""
         from openenv.auto.auto_env import AutoEnv
 
-        with patch.object(
-            AutoEnv, "_check_server_availability", return_value=False
-        ):
+        with patch.object(AutoEnv, "_check_server_availability", return_value=False):
             with pytest.raises(ConnectionError) as exc_info:
                 AutoEnv.from_env(
                     "echo",
@@ -284,12 +280,11 @@ class TestAutoEnvSkipInstall:
         from openenv.auto.auto_env import AutoEnv
 
         with (
+            patch.object(AutoEnv, "_check_space_availability", return_value=True),
             patch.object(
-                AutoEnv, "_check_space_availability", return_value=True
-            ),
-            patch.object(
-                AutoEnv, "_resolve_space_url",
-                return_value="https://user-my-env.hf.space"
+                AutoEnv,
+                "_resolve_space_url",
+                return_value="https://user-my-env.hf.space",
             ),
         ):
             client = AutoEnv.from_env(
@@ -304,16 +299,16 @@ class TestAutoEnvSkipInstall:
         from openenv.auto.auto_env import AutoEnv
 
         with (
+            patch.object(AutoEnv, "_check_space_availability", return_value=False),
             patch.object(
-                AutoEnv, "_check_space_availability", return_value=False
+                AutoEnv,
+                "_resolve_space_url",
+                return_value="https://user-my-env.hf.space",
             ),
             patch.object(
-                AutoEnv, "_resolve_space_url",
-                return_value="https://user-my-env.hf.space"
-            ),
-            patch.object(
-                GenericEnvClient, "from_env",
-                return_value=GenericEnvClient(base_url="http://localhost:8000")
+                GenericEnvClient,
+                "from_env",
+                return_value=GenericEnvClient(base_url="http://localhost:8000"),
             ) as mock_from_env,
         ):
             client = AutoEnv.from_env(
@@ -472,7 +467,9 @@ class TestGenericEnvClientContextManager:
     def test_context_manager_enter_exit(self):
         """Test that context manager works correctly."""
         with (
-            patch.object(GenericEnvClient, "connect", return_value=None) as mock_connect,
+            patch.object(
+                GenericEnvClient, "connect", return_value=None
+            ) as mock_connect,
             patch.object(GenericEnvClient, "close", return_value=None) as mock_close,
         ):
             with GenericEnvClient(base_url="http://localhost:8000") as client:
@@ -852,7 +849,9 @@ class TestAutoEnvAutoActionSkipInstallIntegration:
             # Set env var to bypass confirmation, but mock installation to fail
             with (
                 patch.dict(os.environ, {"OPENENV_TRUST_REMOTE_CODE": "1"}),
-                patch("openenv.auto.auto_action.AutoEnv._ensure_package_from_hub") as mock_ensure,
+                patch(
+                    "openenv.auto.auto_action.AutoEnv._ensure_package_from_hub"
+                ) as mock_ensure,
             ):
                 # Make _ensure_package_from_hub raise an error
                 mock_ensure.side_effect = ValueError("Installation failed")
@@ -863,4 +862,3 @@ class TestAutoEnvAutoActionSkipInstallIntegration:
 
                 # Installation was attempted
                 assert "Installation failed" in str(exc_info.value)
-

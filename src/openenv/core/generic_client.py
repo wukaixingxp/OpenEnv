@@ -165,4 +165,3 @@ class GenericAction(Dict[str, Any]):
         """Return a readable representation."""
         items = ", ".join(f"{k}={v!r}" for k, v in self.items())
         return f"GenericAction({items})"
-

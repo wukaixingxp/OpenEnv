@@ -24,10 +24,18 @@ from __future__ import annotations
 import json
 import logging
 import traceback
+from dataclasses import dataclass
 
 from smolagents import LocalPythonExecutor
 
-from openenv.core.env_server.types import CodeExecResult
+
+@dataclass
+class CodeExecResult:
+    """Result of code execution."""
+
+    stdout: str
+    stderr: str
+    exit_code: int
 
 logger = logging.getLogger(__name__)
 logger.addHandler(logging.NullHandler())

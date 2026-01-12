@@ -158,14 +158,6 @@ class State(BaseModel):
     )
 
 
-class CodeExecResult(BaseMessage):
-    """Result of code execution containing stdout, stderr, and exit code."""
-
-    stdout: str = Field(description="Standard output from code execution")
-    stderr: str = Field(description="Standard error from code execution")
-    exit_code: int = Field(description="Exit code from code execution")
-
-
 class EnvironmentMetadata(BaseMessage):
     """Metadata about an environment for documentation and UI purposes."""
 

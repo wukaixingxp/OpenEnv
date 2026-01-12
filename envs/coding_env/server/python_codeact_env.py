@@ -111,29 +111,20 @@ class PythonCodeActEnv(Environment):
         # Extract timeout from kwargs
         timeout_s = kwargs.get("timeout_s", 60.0)
 
-        # Check if test_code is provided - if not, return reward 0
+        # Check if test_code is provided - if not, run code but zero out all metrics
         if not action.test_code or action.test_code.strip() == "":
             # Execute only the code without tests
             result = self._executor.run(action.code, timeout_s=timeout_s)
 
-            # Check if code compiles
-            code_compiles = result.exit_code == 0
-            if result.exit_code != 0:
-                stderr_lower = result.stderr.lower()
-                if any(
-                    err in stderr_lower
-                    for err in ["syntaxerror", "syntax error", "indentationerror", "nameerror"]
-                ):
-                    code_compiles = False
-
-            # Update state
+            # Update state - zero out all test-related metrics
             self._state.step_count += 1
             self._state.last_exit_code = result.exit_code
-            self._state.last_code_compiles = code_compiles
+            self._state.last_code_compiles = False  # No test_code means we don't evaluate
             self._state.total_tests_passed = 0
             self._state.total_tests_failed = 0
 
-            # Return observation with reward 0 (no tests to validate)
+            # Return observation with all metrics zeroed (no tests to validate)
+            # But still include the code's stdout/stderr/exit_code
             observation = CodeObservation(
                 stdout=result.stdout,
                 stderr=result.stderr,
@@ -145,7 +136,7 @@ class PythonCodeActEnv(Environment):
                 },
                 tests_passed=0,
                 tests_failed=0,
-                code_compiles=code_compiles,
+                code_compiles=False,  # No test_code means we don't evaluate
             )
 
             return self._apply_transform(observation)

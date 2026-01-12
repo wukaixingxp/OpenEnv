@@ -56,7 +56,7 @@ class CodeQualityTransform(Transform):
 
     def __init__(
         self,
-        concise_bonus: float = 1.0,
+        concise_bonus: float = 0.1,
         max_length_threshold: int = 120,
         syntax_penalty: float = -0.2,
     ):

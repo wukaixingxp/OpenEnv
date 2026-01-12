@@ -37,10 +37,9 @@ import shutil
 import subprocess
 import sys
 import requests
-from pathlib import Path
 from typing import Any, Optional, TYPE_CHECKING, Dict
 
-from ._discovery import get_discovery, _is_hub_url, _normalize_env_name
+from ._discovery import get_discovery, _is_hub_url
 
 if TYPE_CHECKING:
     from openenv.core.containers.runtime import ContainerProvider
@@ -86,25 +85,25 @@ def _confirm_remote_install(repo_id: str) -> bool:
     """
     # Check environment variable for automated/CI environments
     if os.environ.get(OPENENV_TRUST_REMOTE_CODE, "").lower() in ("1", "true", "yes"):
-        logger.info(f"Skipping confirmation (OPENENV_TRUST_REMOTE_CODE is set)")
+        logger.info("Skipping confirmation (OPENENV_TRUST_REMOTE_CODE is set)")
         return True
 
     # Check if we're in an interactive terminal
     if not sys.stdin.isatty():
         logger.warning(
-            f"Cannot prompt for confirmation in non-interactive mode. "
-            f"Set OPENENV_TRUST_REMOTE_CODE=1 to allow remote installs."
+            "Cannot prompt for confirmation in non-interactive mode. "
+            "Set OPENENV_TRUST_REMOTE_CODE=1 to allow remote installs."
         )
         return False
 
     print(f"\n{'=' * 60}")
-    print(f"⚠️  SECURITY WARNING: Remote Code Installation")
+    print("⚠️  SECURITY WARNING: Remote Code Installation")
     print(f"{'=' * 60}")
-    print(f"You are about to install code from a remote repository:")
+    print("You are about to install code from a remote repository:")
     print(f"  Repository: {repo_id}")
     print(f"  Source: https://huggingface.co/spaces/{repo_id}")
-    print(f"\nThis will execute code from the internet on your machine.")
-    print(f"Only proceed if you trust the source.")
+    print("\nThis will execute code from the internet on your machine.")
+    print("Only proceed if you trust the source.")
     print(f"{'=' * 60}\n")
 
     try:
@@ -266,61 +265,6 @@ class AutoEnv:
             return False
 
     @classmethod
-    def _download_from_hub(cls, repo_id: str, cache_dir: Optional[Path] = None) -> Path:
-        """
-        Download environment from HuggingFace Hub.
-
-        Note: This method is deprecated. Use _install_from_hub() instead which
-        uses git+ URLs for direct installation without downloading.
-
-        Args:
-            repo_id: HuggingFace repo ID (e.g., "meta-pytorch/coding-env")
-            cache_dir: Optional cache directory
-
-        Returns:
-            Path to downloaded environment directory
-
-        Raises:
-            ImportError: If huggingface_hub is not installed
-            ValueError: If download fails
-        """
-        try:
-            from huggingface_hub import snapshot_download
-        except ImportError:
-            raise ImportError(
-                "HuggingFace Hub support requires huggingface_hub package.\n"
-                "Install it with: pip install huggingface_hub"
-            )
-
-        # Clean up repo_id if it's a full URL
-        if "huggingface.co" in repo_id:
-            # Extract org/repo from URL
-            # https://huggingface.co/meta-pytorch/coding-env -> meta-pytorch/coding-env
-            parts = repo_id.split("/")
-            if len(parts) >= 2:
-                repo_id = f"{parts[-2]}/{parts[-1]}"
-
-        logger.info(f"Downloading environment from HuggingFace Hub: {repo_id}")
-
-        try:
-            # Download to cache
-            import tempfile
-
-            env_path = snapshot_download(
-                repo_id=repo_id,
-                cache_dir=cache_dir
-                or Path(tempfile.gettempdir()) / "openenv_hub_cache",
-                repo_type="space",  # OpenEnv environments are published as Spaces
-            )
-            return Path(env_path)
-        except Exception as e:
-            raise ValueError(
-                f"Failed to download environment from HuggingFace Hub: {repo_id}\n"
-                f"Error: {e}\n"
-                f"Make sure the repository exists and is accessible."
-            ) from e
-
-    @classmethod
     def _get_hub_git_url(cls, repo_id: str) -> str:
         """
         Get the git URL for a HuggingFace Space.
@@ -360,8 +304,8 @@ class AutoEnv:
         # Security check - confirm with user before installing remote code
         if not trust_remote_code and not _confirm_remote_install(repo_id):
             raise ValueError(
-                f"Installation cancelled by user.\n"
-                f"To allow remote installs without prompting, set OPENENV_TRUST_REMOTE_CODE=1"
+                "Installation cancelled by user.\n"
+                "To allow remote installs without prompting, set OPENENV_TRUST_REMOTE_CODE=1"
             )
 
         git_url = cls._get_hub_git_url(repo_id)
@@ -388,14 +332,9 @@ class AutoEnv:
                     for part in parts:
                         if part.startswith("openenv-"):
                             # Remove version suffix (e.g., "openenv-coding_env-0.1.0" -> "openenv-coding_env")
-                            package_name = (
-                                "-".join(part.split("-")[:-1])
-                                if "-"
-                                in part.rsplit("-", 1)[-1].replace(".", "").isdigit()
-                                else part
-                            )
-                            # Handle version suffix more robustly
-                            if any(c.isdigit() for c in part.split("-")[-1]):
+                            # Check if last segment looks like a version number
+                            last_segment = part.rsplit("-", 1)[-1]
+                            if last_segment.replace(".", "").isdigit():
                                 package_name = "-".join(part.rsplit("-", 1)[:-1])
                             else:
                                 package_name = part
@@ -421,97 +360,6 @@ class AutoEnv:
                 f"Error: {error_msg}\n"
                 f"Make sure the repository exists and contains a valid Python package."
             ) from e
-
-    @classmethod
-    def _install_from_path(cls, env_path: Path) -> str:
-        """
-        Install environment package from a local path.
-
-        Note: This method is deprecated for Hub installs. Use _install_from_hub()
-        instead which uses git+ URLs for direct installation.
-
-        Args:
-            env_path: Path to environment directory containing pyproject.toml
-
-        Returns:
-            Package name that was installed
-
-        Raises:
-            ValueError: If installation fails
-        """
-        if not (env_path / "pyproject.toml").exists():
-            raise ValueError(
-                f"Environment directory does not contain pyproject.toml: {env_path}"
-            )
-
-        pip_cmd = _get_pip_command()
-        pip_name = "uv pip" if pip_cmd[0] == "uv" else "pip"
-        logger.info(f"Installing environment from {env_path} using {pip_name}")
-
-        try:
-            # Install in editable mode
-            subprocess.run(
-                [*pip_cmd, "install", "-e", str(env_path)],
-                check=True,
-                capture_output=True,
-                text=True,
-            )
-
-            # Read package name from pyproject.toml
-            import tomli
-
-            with open(env_path / "pyproject.toml", "rb") as f:
-                pyproject = tomli.load(f)
-
-            package_name = pyproject.get("project", {}).get("name")
-            if not package_name:
-                raise ValueError("Could not determine package name from pyproject.toml")
-
-            logger.info(f"Successfully installed: {package_name}")
-            return package_name
-
-        except subprocess.CalledProcessError as e:
-            raise ValueError(
-                f"Failed to install environment package from {env_path}\n"
-                f"Error: {e.stderr}"
-            ) from e
-        except Exception as e:
-            raise ValueError(f"Failed to install environment package: {e}") from e
-
-    @classmethod
-    def _get_package_name_from_hub(cls, name: str) -> tuple[str, Path]:
-        """
-        Download Space and get the package name from pyproject.toml.
-
-        Args:
-            name: HuggingFace repo ID (e.g., "wukaixingxp/coding-env-test")
-
-        Returns:
-            Tuple of (package_name, env_path)
-            Example: ("openenv-coding_env", Path("/tmp/..."))
-        """
-        # Download from Hub
-        env_path = cls._download_from_hub(name)
-
-        # Read package name from pyproject.toml
-        import tomli
-
-        pyproject_path = env_path / "pyproject.toml"
-        if not pyproject_path.exists():
-            raise ValueError(
-                f"Environment directory does not contain pyproject.toml: {env_path}"
-            )
-
-        with open(pyproject_path, "rb") as f:
-            pyproject = tomli.load(f)
-
-        package_name = pyproject.get("project", {}).get("name")
-        if not package_name:
-            raise ValueError(
-                f"Could not determine package name from pyproject.toml at {pyproject_path}"
-            )
-
-        return package_name, env_path
 
     @classmethod
     def _is_package_installed(cls, package_name: str) -> bool:
@@ -577,7 +425,13 @@ class AutoEnv:
 
         # Not installed, install using git+ URL
         logger.info(f"Package not found locally, installing from Hub: {name}")
-        package_name = cls._install_from_hub(name, trust_remote_code=trust_remote_code)
+
+        # Track existing packages before installation
+        get_discovery().clear_cache()
+        existing_envs = set(get_discovery().discover(use_cache=False).keys())
+
+        # Install the package
+        cls._install_from_hub(name, trust_remote_code=trust_remote_code)
 
         # Clear discovery cache to pick up the newly installed package
         try:
@@ -585,11 +439,42 @@ class AutoEnv:
         except Exception:
             pass
         get_discovery().clear_cache()
-        get_discovery().discover(use_cache=False)
+        discovered_envs = get_discovery().discover(use_cache=False)
 
-        # Extract environment name from package name
-        # "openenv-coding_env" -> "coding_env"
-        env_name = package_name.replace("openenv-", "").replace("-", "_")
+        # Find the newly installed environment by comparing before/after
+        new_envs = set(discovered_envs.keys()) - existing_envs
+
+        if new_envs:
+            # Use the first newly discovered environment
+            env_name = next(iter(new_envs))
+            logger.info(f"Found newly installed environment: '{env_name}'")
+        else:
+            # Fallback: try to find by matching module patterns
+            # Look for any env that might match the repo name pattern
+            repo_name = name.split("/")[-1] if "/" in name else name
+            repo_base = repo_name.replace("-", "_").replace("_env", "").replace("_test", "")
+
+            env_name = None
+            for env_key, env_info in discovered_envs.items():
+                # Check if env_key is a prefix/substring match
+                if env_key in repo_base or repo_base.startswith(env_key):
+                    env_name = env_key
+                    logger.info(
+                        f"Found matching environment '{env_name}' for repo '{name}'"
+                    )
+                    break
+
+            if env_name is None:
+                # Last resort: use inferred name from repo
+                env_name = repo_name.replace("-", "_")
+                if not env_name.endswith("_env"):
+                    env_name = f"{env_name}_env"
+                # Strip to get env_key
+                env_name = env_name.replace("_env", "")
+                logger.warning(
+                    f"Could not find newly installed environment for repo '{name}', "
+                    f"using inferred name: {env_name}"
+                )
 
         # Cache the result to avoid redundant installs
         _hub_env_name_cache[name] = env_name
@@ -676,7 +561,7 @@ class AutoEnv:
 
                 # Set base_url to connect to remote Space
                 base_url = space_url
-                logger.info(f"Will connect to remote Space (no local Docker)")
+                logger.info("Will connect to remote Space (no local Docker)")
             else:
                 # Space not accessible or user provided explicit base_url
                 if not space_is_available:
@@ -700,9 +585,9 @@ class AutoEnv:
 
             if not available_envs:
                 raise ValueError(
-                    f"No OpenEnv environments found.\n"
-                    f"Install an environment with: pip install openenv-<env-name>\n"
-                    f"Or specify a HuggingFace Hub repository: AutoEnv.from_env('openenv/echo_env')"
+                    "No OpenEnv environments found.\n"
+                    "Install an environment with: pip install openenv-<env-name>\n"
+                    "Or specify a HuggingFace Hub repository: AutoEnv.from_env('openenv/echo_env')"
                 )
 
             # Try to suggest similar environment names

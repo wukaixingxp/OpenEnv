@@ -17,8 +17,7 @@ Tests cover:
 6. Integration with the discovery system
 """
 
-from typing import Type
-from unittest.mock import MagicMock, Mock, patch
+from unittest.mock import Mock, patch
 
 import pytest
 from openenv.auto._discovery import (
@@ -26,7 +25,6 @@ from openenv.auto._discovery import (
     _normalize_env_name,
     EnvironmentDiscovery,
     EnvironmentInfo,
-    get_discovery,
     reset_discovery,
 )
 from openenv.auto.auto_action import AutoAction
@@ -197,7 +195,7 @@ class TestAutoEnvListEnvironments:
         with patch("openenv.auto.auto_env.get_discovery", return_value=mock_discovery):
             AutoEnv.list_environments()
 
-        captured = capsys.readouterr()
+        capsys.readouterr()  # Clear captured output
         # Should call discovery.list_environments()
         mock_discovery.list_environments.assert_called_once()
 
@@ -272,6 +270,183 @@ class TestAutoEnvHubDetection:
             "https://huggingface.co/wukaixingxp/coding-env-test"
         )
         assert url == "https://wukaixingxp-coding-env-test.hf.space"
+
+
+# ============================================================================
+# Git+ URL Installation Tests
+# ============================================================================
+
+
+class TestGitPlusUrlInstallation:
+    """Test git+ URL installation functionality."""
+
+    def test_get_hub_git_url(self):
+        """Test generating git+ URL from repo ID."""
+        url = AutoEnv._get_hub_git_url("burtenshaw/wordle")
+        assert url == "git+https://huggingface.co/spaces/burtenshaw/wordle"
+
+    def test_get_hub_git_url_from_full_url(self):
+        """Test generating git+ URL from full HuggingFace URL."""
+        url = AutoEnv._get_hub_git_url("https://huggingface.co/spaces/burtenshaw/wordle")
+        assert url == "git+https://huggingface.co/spaces/burtenshaw/wordle"
+
+    def test_install_from_hub_uses_git_url(self, mock_discovery):
+        """Test that _install_from_hub uses git+ URL for installation."""
+        with (
+            patch("openenv.auto.auto_env.get_discovery", return_value=mock_discovery),
+            patch("openenv.auto.auto_env._confirm_remote_install", return_value=True),
+            patch("openenv.auto.auto_env.subprocess.run") as mock_run,
+            patch("openenv.auto.auto_env._get_pip_command", return_value=["pip"]),
+        ):
+            mock_run.return_value = Mock(
+                stdout="Successfully installed openenv-wordle_env-0.1.0",
+                stderr="",
+                returncode=0,
+            )
+
+            result = AutoEnv._install_from_hub("burtenshaw/wordle")
+
+            # Verify git+ URL was used
+            mock_run.assert_called_once()
+            call_args = mock_run.call_args
+            assert "git+https://huggingface.co/spaces/burtenshaw/wordle" in call_args[0][0]
+            # Verify package name is returned
+            assert result == "openenv-wordle_env"
+
+    def test_install_from_hub_respects_user_decline(self):
+        """Test that installation is cancelled when user declines."""
+        with patch("openenv.auto.auto_env._confirm_remote_install", return_value=False):
+            with pytest.raises(ValueError) as exc_info:
+                AutoEnv._install_from_hub("burtenshaw/wordle")
+
+            assert "Installation cancelled" in str(exc_info.value)
+
+    def test_install_from_hub_with_trust_remote_code(self):
+        """Test that trust_remote_code=True skips confirmation."""
+        with (
+            patch("openenv.auto.auto_env._confirm_remote_install") as mock_confirm,
+            patch("openenv.auto.auto_env.subprocess.run") as mock_run,
+            patch("openenv.auto.auto_env._get_pip_command", return_value=["pip"]),
+        ):
+            mock_run.return_value = Mock(
+                stdout="Successfully installed openenv-wordle_env-0.1.0",
+                stderr="",
+                returncode=0,
+            )
+
+            AutoEnv._install_from_hub("burtenshaw/wordle", trust_remote_code=True)
+
+            # Confirmation should not be called when trust_remote_code=True
+            mock_confirm.assert_not_called()
+
+
+# ============================================================================
+# uv pip Detection Tests
+# ============================================================================
+
+
+class TestUvPipDetection:
+    """Test uv pip detection and command selection."""
+
+    def test_has_uv_when_available(self):
+        """Test _has_uv returns True when uv is installed."""
+        from openenv.auto.auto_env import _has_uv
+
+        with patch("shutil.which", return_value="/usr/local/bin/uv"):
+            assert _has_uv() is True
+
+    def test_has_uv_when_not_available(self):
+        """Test _has_uv returns False when uv is not installed."""
+        from openenv.auto.auto_env import _has_uv
+
+        with patch("shutil.which", return_value=None):
+            assert _has_uv() is False
+
+    def test_get_pip_command_prefers_uv(self):
+        """Test _get_pip_command returns uv pip when uv is available."""
+        from openenv.auto.auto_env import _get_pip_command
+
+        with patch("openenv.auto.auto_env._has_uv", return_value=True):
+            cmd = _get_pip_command()
+            assert cmd == ["uv", "pip"]
+
+    def test_get_pip_command_falls_back_to_pip(self):
+        """Test _get_pip_command returns pip when uv is not available."""
+        from openenv.auto.auto_env import _get_pip_command
+        import sys
+
+        with patch("openenv.auto.auto_env._has_uv", return_value=False):
+            cmd = _get_pip_command()
+            assert cmd == [sys.executable, "-m", "pip"]
+
+
+# ============================================================================
+# User Confirmation Tests
+# ============================================================================
+
+
+class TestUserConfirmation:
+    """Test user confirmation for remote code installation."""
+
+    def test_confirm_skipped_with_env_var(self):
+        """Test confirmation is skipped when OPENENV_TRUST_REMOTE_CODE is set."""
+        from openenv.auto.auto_env import _confirm_remote_install
+        import os
+
+        with patch.dict(os.environ, {"OPENENV_TRUST_REMOTE_CODE": "1"}):
+            result = _confirm_remote_install("test/repo")
+            assert result is True
+
+    def test_confirm_skipped_with_env_var_true(self):
+        """Test confirmation is skipped when OPENENV_TRUST_REMOTE_CODE=true."""
+        from openenv.auto.auto_env import _confirm_remote_install
+        import os
+
+        with patch.dict(os.environ, {"OPENENV_TRUST_REMOTE_CODE": "true"}):
+            result = _confirm_remote_install("test/repo")
+            assert result is True
+
+    def test_confirm_returns_false_in_non_interactive(self):
+        """Test confirmation returns False in non-interactive mode."""
+        from openenv.auto.auto_env import _confirm_remote_install
+        import os
+
+        with (
+            patch.dict(os.environ, {}, clear=True),
+            patch("sys.stdin.isatty", return_value=False),
+        ):
+            # Clear the env var if it exists
+            os.environ.pop("OPENENV_TRUST_REMOTE_CODE", None)
+            result = _confirm_remote_install("test/repo")
+            assert result is False
+
+    def test_confirm_prompts_user_when_interactive(self):
+        """Test confirmation prompts user in interactive mode."""
+        from openenv.auto.auto_env import _confirm_remote_install
+        import os
+
+        with (
+            patch.dict(os.environ, {}, clear=True),
+            patch("sys.stdin.isatty", return_value=True),
+            patch("builtins.input", return_value="y"),
+        ):
+            os.environ.pop("OPENENV_TRUST_REMOTE_CODE", None)
+            result = _confirm_remote_install("test/repo")
+            assert result is True
+
+    def test_confirm_user_declines(self):
+        """Test confirmation returns False when user declines."""
+        from openenv.auto.auto_env import _confirm_remote_install
+        import os
+
+        with (
+            patch.dict(os.environ, {}, clear=True),
+            patch("sys.stdin.isatty", return_value=True),
+            patch("builtins.input", return_value="n"),
+        ):
+            os.environ.pop("OPENENV_TRUST_REMOTE_CODE", None)
+            result = _confirm_remote_install("test/repo")
+            assert result is False
 
 
 # ============================================================================
@@ -724,7 +899,7 @@ class TestHuggingFaceSpaceIntegration:
             # Check if stdout contains our message
             if hasattr(result.observation, "stdout"):
                 assert "Hello from pytest!" in result.observation.stdout
-                print(f"✅ Code execution successful!")
+                print("✅ Code execution successful!")
                 print(f"   stdout: {result.observation.stdout}")
 
             print(f"   reward: {result.reward}")
@@ -756,13 +931,12 @@ class TestHuggingFaceSpaceIntegration:
             step_result = env.step(action)
 
             assert step_result is not None
-            print(f"✅ AutoEnv and AutoAction work together correctly")
+            print("✅ AutoEnv and AutoAction work together correctly")
         finally:
             env.close()
 
     def test_space_availability_check(self):
         """Test the Space availability check functionality."""
-        import requests
 
         # Test with real Space URL
         space_url = AutoEnv._resolve_space_url(self.HF_SPACE_REPO)
@@ -858,7 +1032,7 @@ class TestDockerIntegration:
             assert result is not None
             assert hasattr(result, "observation")
 
-            print(f"✅ Docker container started successfully")
+            print("✅ Docker container started successfully")
             print(f"   Reset observation: {result.observation}")
 
             # Send a message
@@ -870,7 +1044,7 @@ class TestDockerIntegration:
             assert hasattr(step_result.observation, "echoed_message")
             assert "Hello from Docker test!" in step_result.observation.echoed_message
 
-            print(f"✅ Message echoed successfully")
+            print("✅ Message echoed successfully")
             print(f"   echoed_message: {step_result.observation.echoed_message}")
         finally:
             # Clean up - this should stop the container
@@ -903,7 +1077,7 @@ class TestDockerIntegration:
                 in step_result.observation.echoed_message
             )
 
-            print(f"✅ AutoAction with Docker works correctly")
+            print("✅ AutoAction with Docker works correctly")
         finally:
             env.close()
 
@@ -916,7 +1090,7 @@ class TestDockerIntegration:
             assert info["env_key"] == "echo"
             assert info["default_image"] == "echo-env:latest"
 
-            print(f"✅ Environment info retrieved successfully")
+            print("✅ Environment info retrieved successfully")
             print(f"   env_key: {info['env_key']}")
             print(f"   default_image: {info['default_image']}")
             print(f"   env_class: {info['env_class']}")
@@ -991,7 +1165,7 @@ class TestLocalServerIntegration:
             assert step_result is not None
             assert "Hello local server!" in step_result.observation.echoed_message
 
-            print(f"✅ Local server test passed")
+            print("✅ Local server test passed")
             print(f"   echoed_message: {step_result.observation.echoed_message}")
         finally:
             env.close()

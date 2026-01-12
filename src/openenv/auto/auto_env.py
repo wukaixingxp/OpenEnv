@@ -493,6 +493,7 @@ class AutoEnv:
         wait_timeout: float = 30.0,
         env_vars: Optional[Dict[str, str]] = None,
         trust_remote_code: bool = False,
+        skip_install: bool = False,
         **kwargs: Any,
     ) -> "EnvClient":
         """
@@ -518,6 +519,13 @@ class AutoEnv:
             trust_remote_code: If True, skip user confirmation when installing
                 from HuggingFace Hub. Can also be set via OPENENV_TRUST_REMOTE_CODE
                 environment variable.
+            skip_install: If True, skip package installation and return a
+                GenericEnvClient for remote environments. Useful when you only
+                want to connect to a running server without installing any
+                remote code. When True:
+                - If base_url is provided: connects directly using GenericEnvClient
+                - If HF Space is running: connects to Space using GenericEnvClient
+                - If HF Space is not running: uses Docker from HF registry
             **kwargs: Additional arguments passed to the client class
 
         Returns:
@@ -542,7 +550,77 @@ class AutoEnv:
             ...     "dipg",
             ...     env_vars={"DIPG_DATASET_PATH": "/data/dipg"}
             ... )
+            >>>
+            >>> # Skip package installation, use GenericEnvClient
+            >>> env = AutoEnv.from_env(
+            ...     "user/my-env",
+            ...     skip_install=True
+            ... )
         """
+        from openenv.core import GenericEnvClient
+
+        # Handle skip_install mode - return GenericEnvClient without package installation
+        if skip_install:
+            # If base_url is provided, connect directly
+            if base_url:
+                if cls._check_server_availability(base_url):
+                    logger.info(
+                        f"Using GenericEnvClient for {base_url} (skip_install=True)"
+                    )
+                    return GenericEnvClient(base_url=base_url, **kwargs)
+                else:
+                    raise ConnectionError(
+                        f"Server not available at {base_url}. "
+                        f"Please ensure the server is running."
+                    )
+
+            # If it's a Hub URL, try to connect to Space or use Docker
+            if _is_hub_url(name):
+                space_url = cls._resolve_space_url(name)
+                logger.info(f"Checking if HuggingFace Space is accessible: {space_url}")
+
+                if cls._check_space_availability(space_url):
+                    logger.info(
+                        f"Using GenericEnvClient for Space {space_url} (skip_install=True)"
+                    )
+                    return GenericEnvClient(base_url=space_url, **kwargs)
+                else:
+                    # Space not running, use Docker from HF registry
+                    logger.info(
+                        f"Space not running at {space_url}, "
+                        f"using GenericEnvClient with HF Docker registry"
+                    )
+                    return GenericEnvClient.from_env(
+                        name,
+                        use_docker=True,
+                        provider=container_provider,
+                        env_vars=env_vars or {},
+                        **kwargs,
+                    )
+
+            # For local environments with skip_install, we need docker_image
+            if docker_image:
+                logger.info(
+                    f"Using GenericEnvClient with Docker image {docker_image} "
+                    f"(skip_install=True)"
+                )
+                return GenericEnvClient.from_docker_image(
+                    image=docker_image,
+                    provider=container_provider,
+                    wait_timeout=wait_timeout,
+                    env_vars=env_vars or {},
+                    **kwargs,
+                )
+            else:
+                raise ValueError(
+                    f"Cannot use skip_install=True for local environment '{name}' "
+                    f"without providing base_url or docker_image. "
+                    f"For local environments, either:\n"
+                    f"  1. Provide base_url to connect to a running server\n"
+                    f"  2. Provide docker_image to start a container\n"
+                    f"  3. Set skip_install=False to use the installed package"
+                )
+
         # Check if it's a HuggingFace Hub URL or repo ID
         if _is_hub_url(name):
             # Try to connect to Space directly first
@@ -677,6 +755,7 @@ class AutoEnv:
         wait_timeout: float = 30.0,
         env_vars: Optional[Dict[str, str]] = None,
         trust_remote_code: bool = False,
+        skip_install: bool = False,
         **kwargs: Any,
     ) -> "EnvClient":
         """
@@ -693,6 +772,8 @@ class AutoEnv:
             env_vars: Optional environment variables for the container
             trust_remote_code: If True, skip user confirmation when installing
                 from HuggingFace Hub
+            skip_install: If True, skip package installation and return a
+                GenericEnvClient for remote environments
             **kwargs: Additional arguments passed to the client class
 
         Returns:
@@ -710,6 +791,7 @@ class AutoEnv:
             wait_timeout=wait_timeout,
             env_vars=env_vars,
             trust_remote_code=trust_remote_code,
+            skip_install=skip_install,
             **kwargs,
         )
 

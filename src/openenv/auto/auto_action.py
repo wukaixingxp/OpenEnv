@@ -80,7 +80,7 @@ class AutoAction:
         )
 
     @classmethod
-    def from_env(cls, name: str) -> Type:
+    def from_env(cls, name: str, skip_install: bool = False) -> Type:
         """
         Get the Action class from environment name or HuggingFace Hub repository.
 
@@ -96,13 +96,17 @@ class AutoAction:
                   - "coding" / "coding-env" / "coding_env"
                   - "meta-pytorch/coding-env" (Hub repo ID)
                   - "https://huggingface.co/meta-pytorch/coding-env" (Hub URL)
+            skip_install: If True, skip package installation and return
+                GenericAction class instead. Use this when working with
+                GenericEnvClient to avoid installing remote packages.
 
         Returns:
-            Action class (not an instance!)
+            Action class (not an instance!). Returns GenericAction when
+            skip_install=True.
 
         Raises:
-            ValueError: If environment not found
-            ImportError: If environment package is not installed
+            ValueError: If environment not found (only when skip_install=False)
+            ImportError: If environment package is not installed (only when skip_install=False)
 
         Examples:
             >>> # From installed package
@@ -113,11 +117,25 @@ class AutoAction:
             >>> CodeAction = AutoAction.from_env("meta-pytorch/coding-env")
             >>> action = CodeAction(code="print('Hello!')")
             >>>
+            >>> # Skip installation, use GenericAction (for GenericEnvClient)
+            >>> ActionClass = AutoAction.from_env("user/repo", skip_install=True)
+            >>> action = ActionClass(code="print('Hello!')")  # Returns GenericAction
+            >>>
             >>> # Different name formats
             >>> EchoAction = AutoAction.from_env("echo")
             >>> EchoAction = AutoAction.from_env("echo-env")
             >>> EchoAction = AutoAction.from_env("echo_env")
         """
+        # If skip_install is True, return GenericAction without any package lookup
+        if skip_install:
+            from openenv.core.generic_client import GenericAction
+
+            logger.info(
+                f"Returning GenericAction for '{name}' (skip_install=True). "
+                f"Use keyword arguments to create actions: GenericAction(code='...')"
+            )
+            return GenericAction
+
         # Check if it's a HuggingFace Hub URL or repo ID
         if _is_hub_url(name):
             # Ensure package is installed (reuse AutoEnv logic, downloads only if needed)
@@ -166,7 +184,7 @@ class AutoAction:
             ) from e
 
     @classmethod
-    def from_hub(cls, env_name: str) -> Type:
+    def from_hub(cls, env_name: str, skip_install: bool = False) -> Type:
         """
         Get the Action class from environment name.
 
@@ -174,6 +192,8 @@ class AutoAction:
 
         Args:
             env_name: Environment name (e.g., "coding", "echo")
+            skip_install: If True, skip package installation and return
+                GenericAction class instead.
 
         Returns:
             Action class (not an instance!)
@@ -182,7 +202,7 @@ class AutoAction:
             >>> CodeAction = AutoAction.from_hub("coding")
             >>> action = CodeAction(code="print('Hello!')")
         """
-        return cls.from_env(env_name)
+        return cls.from_env(env_name, skip_install=skip_install)
 
     @classmethod
     def get_action_info(cls, name: str) -> Dict[str, Any]:

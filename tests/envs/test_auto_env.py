@@ -287,7 +287,9 @@ class TestGitPlusUrlInstallation:
 
     def test_get_hub_git_url_from_full_url(self):
         """Test generating git+ URL from full HuggingFace URL."""
-        url = AutoEnv._get_hub_git_url("https://huggingface.co/spaces/burtenshaw/wordle")
+        url = AutoEnv._get_hub_git_url(
+            "https://huggingface.co/spaces/burtenshaw/wordle"
+        )
         assert url == "git+https://huggingface.co/spaces/burtenshaw/wordle"
 
     def test_install_from_hub_uses_git_url(self, mock_discovery):
@@ -309,7 +311,9 @@ class TestGitPlusUrlInstallation:
             # Verify git+ URL was used
             mock_run.assert_called_once()
             call_args = mock_run.call_args
-            assert "git+https://huggingface.co/spaces/burtenshaw/wordle" in call_args[0][0]
+            assert (
+                "git+https://huggingface.co/spaces/burtenshaw/wordle" in call_args[0][0]
+            )
             # Verify package name is returned
             assert result == "openenv-wordle_env"
 

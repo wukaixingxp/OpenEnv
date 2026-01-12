@@ -452,7 +452,9 @@ class AutoEnv:
             # Fallback: try to find by matching module patterns
             # Look for any env that might match the repo name pattern
             repo_name = name.split("/")[-1] if "/" in name else name
-            repo_base = repo_name.replace("-", "_").replace("_env", "").replace("_test", "")
+            repo_base = (
+                repo_name.replace("-", "_").replace("_env", "").replace("_test", "")
+            )
 
             env_name = None
             for env_key, env_info in discovered_envs.items():

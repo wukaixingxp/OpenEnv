@@ -48,12 +48,17 @@ class PyExecutor:
     LocalPythonExecutor that can be used by the executed code to
     format exceptions and to safely stringify results for improved
     error reporting.
+
+    Args:
+        additional_imports: List of additional module imports to authorize
+                          (e.g., ["numpy", "pandas", "matplotlib"])
     """
 
     def __init__(self, additional_imports: list[str] | None = None):
         if additional_imports is None:
             additional_imports = []
 
+        self._additional_imports = additional_imports
         self._executor = LocalPythonExecutor(additional_authorized_imports=additional_imports)
 
         # Register helpful utilities exposed to the execution environment.
@@ -76,14 +81,25 @@ class PyExecutor:
             # send_tools or fails, log and continue — the executor is still usable.
             logger.debug("LocalPythonExecutor.send_tools failed; continuing without extra tools", exc_info=True)
 
-    def run(self, code: str) -> CodeExecResult:
+    def run(self, code: str, timeout_s: float | None = None) -> CodeExecResult:
         """Execute Python code and return a CodeExecResult.
 
         This method is intentionally defensive: it attempts to extract
         meaningful stdout/stderr/exit_code information from a variety of
         possible return shapes that different versions of smolagents
         may provide.
+
+        Args:
+            code: Python code to execute
+            timeout_s: Maximum execution time in seconds. If None, uses default timeout (60s).
+
+        Returns:
+            CodeExecResult with stdout, stderr, and exit_code
         """
+        # Use default timeout if none provided
+        if timeout_s is None:
+            timeout_s = 60.0
+
         try:
             exec_result = self._executor(code)
 
